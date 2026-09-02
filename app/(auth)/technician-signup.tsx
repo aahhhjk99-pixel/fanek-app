@@ -107,10 +107,18 @@ export default function TechnicianSignupScreen() {
 
     setLoading(true);
     try {
-      const email = `${phone}@services.ly`;
+      const email = `${phone.trim()}@services.ly`;
+      
+      // 1. تسجيل المستخدم وإمرارية role في auth metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            role: 'technician',
+            full_name: fullName.trim(),
+          },
+        },
       });
 
       if (authError || !authData?.user) {
@@ -118,7 +126,9 @@ export default function TechnicianSignupScreen() {
       }
 
       const user = authData.user;
-      const { error: profileError } = await supabase.from('profiles').insert({
+
+      // 2. تحديث الملف الشخصي عبر upsert لمنع خطأ التعارض مع Trigger
+      const { error: profileError } = await supabase.from('profiles').upsert({
         id: user.id,
         full_name: fullName.trim(),
         phone: phone.trim(),
@@ -135,14 +145,15 @@ export default function TechnicianSignupScreen() {
 
       if (profileError) throw new Error(profileError.message);
 
-      const { error: walletError } = await supabase.from('wallets').insert({
+      // 3. إنشاء أو تحديث المحفظة
+      const { error: walletError } = await supabase.from('wallets').upsert({
         technician_id: user.id,
         balance: PROMO_TECHNICIAN_BONUS,
       });
 
       if (walletError) throw new Error(walletError.message);
 
-      // Record the signup bonus in the financial ledger
+      // 4. تسجيل مكافأة التسجيل في السجل المالي
       const ledgerId = crypto.randomUUID();
       await supabase.from('financial_ledger').insert({
         transaction_id: ledgerId,
@@ -155,11 +166,17 @@ export default function TechnicianSignupScreen() {
         description: `رصيد افتتاحي مجاني (${PROMO_TECHNICIAN_BONUS} ${CURRENCY})`,
       });
 
+      // 5. التوجيه لصفحة تسجيل الدخول حتى لا يرفضه Auth Guard أثناء المراجعة
       Alert.alert(
-        'تم',
-        `تم إنشاء حسابك بنجاح! تم إضافة ${PROMO_TECHNICIAN_BONUS} ${CURRENCY} رصيد مجاني إلى محفظتك. حسابك قيد المراجعة من قبل الأدمن.`
+        'تم التسجيل',
+        `تم إنشاء حسابك بنجاح! تم إضافة ${PROMO_TECHNICIAN_BONUS} ${CURRENCY} رصيد مجاني إلى محفظتك. حسابك حالياً قيد المراجعة من الإدارة.`,
+        [
+          {
+            text: 'حسناً',
+            onPress: () => router.replace('/(auth)/login'),
+          },
+        ]
       );
-      router.replace('/(tabs)');
     } catch (err: any) {
       setError(err.message || 'حدث خطأ أثناء إنشاء الحساب');
     } finally {

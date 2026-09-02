@@ -49,9 +49,6 @@ export default function TabLayout() {
     );
   }
 
-  // Any route file under (tabs)/ that isn't part of this role's tab list
-  // must still be explicitly declared (hidden), otherwise expo-router
-  // auto-adds it as an extra, unlabeled tab.
   const shownNames = new Set(tabs.map((t) => t.name));
   const hiddenNames = ALL_TAB_NAMES.filter((n) => !shownNames.has(n));
 

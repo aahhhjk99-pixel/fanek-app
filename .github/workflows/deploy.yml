@@ -32,10 +32,15 @@ jobs:
         run: npm install
 
       - name: Export web build
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: 'https://ehrkdqsfelynlqlbmfhq.supabase.co'
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: 'sb_publishable_WAA5mbMiPpwCm4-sctJ6qA_gMQ38er9'
         run: npx expo export --platform web
 
-      - name: Disable Jekyll
-        run: touch dist/.nojekyll
+      - name: Fix Routing and Disable Jekyll
+        run: |
+          touch dist/.nojekyll
+          cp dist/index.html dist/404.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

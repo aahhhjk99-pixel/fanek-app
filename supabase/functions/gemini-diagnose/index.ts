@@ -9,20 +9,22 @@ const corsHeaders = {
 const SYSTEM_PROMPT = `أنت مساعد ذكي لتصنيف أعطال المنازل في ليبيا. مهمتك هي تحليل وصف العطل أو صورته وتصنيفه إلى أحد التخصصات التالية فقط:
 - سباكة
 - كهرباء
-- مولدات
-- دهانات
-- بناء
 - تكييف
+- مؤهلات
+- بناء
+- حدادة
 - أجهزة
 - نجارة
-- أمن
+- ألومنيوم
+- ألمنيوم
 
 أرجع النتيجة بصيغة JSON فقط بدون أي نص إضافي:
-{"specialty": "<التخصص>", "confidence": <رقم من 0 إلى 1>, "summary": "<وصف مختصر للعطل بالعربية>"}`;
+{"specialty": "التخصص", "confidence": رقم من 0 إلى 1, "summary": "وصف مختصر للعمل بالعربية"}`;
 
 Deno.serve(async (req: Request) => {
+  // الرد الصحيح على طلب الإذن المبدئي من المتصفح (CORS Preflight)
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   try {
@@ -38,7 +40,7 @@ Deno.serve(async (req: Request) => {
     const apiKey = Deno.env.get("GEMINI_API_KEY");
     if (!apiKey) {
       return new Response(
-        JSON.stringify({ error: "مفتاح Gemini غير مهيأ" }),
+        JSON.stringify({ error: "غير مفعل Gemini مفتاح" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -75,7 +77,7 @@ Deno.serve(async (req: Request) => {
     if (!response.ok) {
       const errText = await response.text();
       return new Response(
-        JSON.stringify({ error: "فشل الاتصال بـ Gemini", details: errText }),
+        JSON.stringify({ error: "خطأ في الاتصال مع Gemini", details: errText }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -93,20 +95,31 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const validSpecialties = ["سباكة", "كهرباء", "مولدات", "دهانات", "بناء", "تكييف", "أجهزة", "نجارة", "أمن"];
+    const validSpecialties = [
+      "سباكة",
+      "كهرباء",
+      "تكييف",
+      "مؤهلات",
+      "بناء",
+      "حدادة",
+      "أجهزة",
+      "نجارة",
+      "ألومنيوم",
+      "ألمنيوم",
+    ];
     if (!validSpecialties.includes(parsed.specialty)) {
-      parsed.specialty = "أجهزة";
+      parsed.specialty = "أخرى";
     }
 
     return new Response(
       JSON.stringify({
         specialty: parsed.specialty,
-        confidence: parsed.confidence ?? 0.5,
+        confidence: parsed.confidence || 0.5,
         summary: parsed.summary || description || "",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (err) {
+  } catch (err: any) {
     return new Response(
       JSON.stringify({ error: err.message || "خطأ داخلي" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

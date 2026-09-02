@@ -20,19 +20,23 @@ export default function TabLayout() {
     return <Redirect href="/(auth)/" />;
   }
 
-  const role = profile.role;
+  // معالجة نوع الحساب لتفادي مشاكل الأحرف الكبيرة أو الحقول الفارغة
+  const role = (profile?.role || 'customer').toLowerCase();
 
-  const ALL_TAB_NAMES = ['index', 'orders', 'wallet-tab', 'support-tab', 'profile'];
+  // إضافة جميع أسماء الصفحات الموجودة في مجلد (tabs) بما فيها admin و ledger لضمان عدم تعطل التنقل
+  const ALL_TAB_NAMES = [
+    'index', 
+    'orders', 
+    'wallet-tab', 
+    'support-tab', 
+    'profile', 
+    'admin', 
+    'ledger'
+  ];
+  
   const tabs: any[] = [];
 
-  if (role === 'customer') {
-    tabs.push(
-      { name: 'index', title: 'الرئيسية', icon: Home },
-      { name: 'orders', title: 'طلباتي', icon: ClipboardList },
-      { name: 'support-tab', title: 'الدعم', icon: LifeBuoy },
-      { name: 'profile', title: 'حسابي', icon: User }
-    );
-  } else if (role === 'technician') {
+  if (role === 'technician') {
     tabs.push(
       { name: 'index', title: 'الرئيسية', icon: Home },
       { name: 'orders', title: 'الطلبات', icon: ClipboardList },
@@ -44,6 +48,14 @@ export default function TabLayout() {
     tabs.push(
       { name: 'index', title: 'الرئيسية', icon: LayoutDashboard },
       { name: 'orders', title: 'الطلبات', icon: ClipboardList },
+      { name: 'support-tab', title: 'الدعم', icon: LifeBuoy },
+      { name: 'profile', title: 'حسابي', icon: User }
+    );
+  } else {
+    // حساب الزبون الافتراضي
+    tabs.push(
+      { name: 'index', title: 'الرئيسية', icon: Home },
+      { name: 'orders', title: 'طلباتي', icon: ClipboardList },
       { name: 'support-tab', title: 'الدعم', icon: LifeBuoy },
       { name: 'profile', title: 'حسابي', icon: User }
     );

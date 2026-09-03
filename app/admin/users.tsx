@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { router } from 'expo-router';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl,
-  Alert, TextInput,
+  Alert, TextInput, Modal, ActivityIndicator,
 } from 'react-native';
 import {
-  ChevronLeft, Search, Ban, CheckCircle, Trash2, Users, Wrench, UserCircle,
+  ChevronLeft, Search, Ban, CheckCircle, Trash2, Users, Wrench, UserCircle, Percent,
 } from 'lucide-react-native';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +19,11 @@ export default function AdminUsersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+
+  // حالة مودال تعديل نسبة العمولة
+  const [selectedTech, setSelectedTech] = useState<Profile | null>(null);
+  const [newCommission, setNewCommission] = useState('');
+  const [updatingCommission, setUpdatingCommission] = useState(false);
 
   const loadUsers = useCallback(async () => {
     let query = supabase.from('profiles').select('*');
@@ -37,7 +42,7 @@ export default function AdminUsersScreen() {
   const filteredUsers = users.filter((u) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return u.full_name.toLowerCase().includes(q) || (u.phone || '').includes(q);
+    return u.full_name?.toLowerCase().includes(q) || (u.phone || '').includes(q);
   });
 
   const handleBan = (user: Profile) => {
@@ -99,6 +104,35 @@ export default function AdminUsersScreen() {
     );
   };
 
+  // حفظ نسبة العمولة الجديدة للفني
+  const handleUpdateCommission = async () => {
+    if (!selectedTech) return;
+    const rate = parseFloat(newCommission);
+
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      Alert.alert('خطأ', 'يرجى إدخال نسبة مئوية صحيحة بين 0 و 100');
+      return;
+    }
+
+    setUpdatingCommission(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ commission_rate: rate })
+        .eq('id', selectedTech.id);
+
+      if (error) throw error;
+
+      Alert.alert('نجاح', `تم تحديث نسبة العمولة إلى ${rate}% بنجاح`);
+      setSelectedTech(null);
+      loadUsers();
+    } catch (err: any) {
+      Alert.alert('خطأ', err.message || 'حدث خطأ أثناء التحديث');
+    } finally {
+      setUpdatingCommission(false);
+    }
+  };
+
   const roleLabel = (role: string) => role === 'customer' ? 'زبون' : role === 'technician' ? 'فني' : 'أدمن';
   const roleColor = (role: string) => role === 'customer' ? colors.primary : role === 'technician' ? colors.success : colors.error;
 
@@ -109,7 +143,7 @@ export default function AdminUsersScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <ChevronLeft color={colors.text} size={24} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>إدارة الحسابات</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>إدارة الحسابات والعمولات</Text>
           <View style={{ width: 28 }} />
         </View>
         <View style={[styles.searchBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
@@ -153,6 +187,8 @@ export default function AdminUsersScreen() {
           filteredUsers.map((user) => {
             const isBanned = user.account_status === 'banned';
             const rColor = roleColor(user.role);
+            const currentCommission = (user as any).commission_rate ?? 10.0;
+
             return (
               <View key={user.id} style={[styles.userCard, { backgroundColor: colors.cardBg, borderColor: isBanned ? colors.error + '40' : colors.border }]}>
                 <View style={styles.userHeader}>
@@ -189,6 +225,28 @@ export default function AdminUsersScreen() {
                     <Text style={[styles.userDate, { color: colors.subtext }]}>عضو منذ {formatDate(user.created_at)}</Text>
                   </View>
                 </View>
+
+                {/* قسم نسبة العمولة المخصص للفنيين */}
+                {user.role === 'technician' && (
+                  <View style={[styles.commissionRow, { borderTopColor: colors.border }]}>
+                    <View style={styles.commissionBadge}>
+                      <Percent color={colors.primary} size={14} />
+                      <Text style={[styles.commissionLabel, { color: colors.subtext }]}>عمولة المنصة:</Text>
+                      <Text style={[styles.commissionValue, { color: colors.primary }]}>{currentCommission}%</Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.editCommissionBtn, { backgroundColor: colors.primary + '15' }]}
+                      onPress={() => {
+                        setSelectedTech(user);
+                        setNewCommission(currentCommission.toString());
+                      }}
+                    >
+                      <Text style={[styles.editCommissionText, { color: colors.primary }]}>تعديل النسبة</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 {user.role !== 'admin' && (
                   <View style={styles.actionRow}>
                     <TouchableOpacity
@@ -214,6 +272,51 @@ export default function AdminUsersScreen() {
           })
         )}
       </ScrollView>
+
+      {/* نافذة تعديل العمولة (Modal) */}
+      <Modal visible={!!selectedTech} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>تعديل نسبة عمولة الفني</Text>
+            <Text style={[styles.modalSub, { color: colors.subtext }]}>
+              الفني: {selectedTech?.full_name}
+            </Text>
+
+            <View style={[styles.inputBox, { borderColor: colors.border }]}>
+              <TextInput
+                style={[styles.modalInput, { color: colors.text }]}
+                keyboardType="numeric"
+                value={newCommission}
+                onChangeText={setNewCommission}
+                placeholder="أدخل النسبة (مثلاً 10)"
+                placeholderTextColor={colors.subtext}
+              />
+              <Text style={{ color: colors.subtext, fontFamily: 'Cairo-Bold' }}>%</Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.border }]}
+                onPress={() => setSelectedTech(null)}
+              >
+                <Text style={{ color: colors.text, fontFamily: 'Cairo-Bold' }}>إلغاء</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.primary }]}
+                onPress={handleUpdateCommission}
+                disabled={updatingCommission}
+              >
+                {updatingCommission ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={{ color: '#fff', fontFamily: 'Cairo-Bold' }}>حفظ التغيير</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -242,7 +345,21 @@ const styles = StyleSheet.create({
   bannedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   bannedText: { fontFamily: 'Cairo-Medium', fontSize: 11 },
   userDate: { fontFamily: 'Cairo-Regular', fontSize: 11, marginTop: 6 },
+  commissionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTopWidth: 1 },
+  commissionBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  commissionLabel: { fontFamily: 'Cairo-Regular', fontSize: 12 },
+  commissionValue: { fontFamily: 'Cairo-Bold', fontSize: 13 },
+  editCommissionBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  editCommissionText: { fontFamily: 'Cairo-Bold', fontSize: 12 },
   actionRow: { flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 12, borderTopColor: '#e5e7eb', borderTopWidth: 1 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
   actionText: { fontFamily: 'Cairo-Medium', fontSize: 13 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { width: '100%', borderRadius: 16, padding: 20 },
+  modalTitle: { fontFamily: 'Cairo-Bold', fontSize: 18, textAlign: 'center' },
+  modalSub: { fontFamily: 'Cairo-Regular', fontSize: 13, textAlign: 'center', marginTop: 4, marginBottom: 16 },
+  inputBox: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, height: 48, marginBottom: 20 },
+  modalInput: { flex: 1, fontFamily: 'Cairo-Bold', fontSize: 16, textAlign: 'right' },
+  modalActions: { flexDirection: 'row', gap: 12 },
+  modalBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
 });

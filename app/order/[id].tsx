@@ -151,6 +151,7 @@ export default function OrderDetailScreen() {
       (!profile.commission_exempt_until || new Date(profile.commission_exempt_until) > now);
     const rate = isExempt ? 0 : (profile.commission_rate ?? COMMISSION_RATE) / 100;
     const commission = total * rate;
+
     const { error } = await supabase.from('invoices').insert({
       order_id: order.id,
       technician_id: profile.id,
@@ -162,11 +163,24 @@ export default function OrderDetailScreen() {
       status: 'issued',
       locked: false,
     });
+
     if (error) {
       show('فشل إصدار الفاتورة', 'error');
     } else {
+      // خصم العمولة من محفظة الفني
+      if (commission > 0) {
+        const { error: rpcError } = await supabase.rpc('deduct_tech_commission', {
+          p_technician_id: profile.id,
+          p_commission_amount: commission,
+        });
+
+        if (rpcError) {
+          console.error('خطأ أثناء خصم العمولة من المحفظة:', rpcError);
+        }
+      }
+
       await supabase.from('orders').update({ status: 'invoice_issued' }).eq('id', order.id);
-      show('تم إصدار الفاتورة', 'success');
+      show('تم إصدار الفاتورة وخصم العمولة', 'success');
       setShowInvoiceForm(false);
       setLaborCost('');
       setPartsCost('');

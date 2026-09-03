@@ -50,10 +50,18 @@ export default function CustomerSignupScreen() {
 
     setLoading(true);
     try {
-      const email = `${phone}@services.ly`;
+      const email = `${phone.trim()}@services.ly`;
+
+      // 1. إنشاء حساب المصادقة وإمرارية البيانات في metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            role: 'customer',
+            full_name: fullName.trim(),
+          },
+        },
       });
 
       if (authError || !authData?.user) {
@@ -61,7 +69,9 @@ export default function CustomerSignupScreen() {
       }
 
       const user = authData.user;
-      const { error: profileError } = await supabase.from('profiles').insert({
+
+      // 2. تحديث الملف الشخصي عبر upsert لتجنب التعارض
+      const { error: profileError } = await supabase.from('profiles').upsert({
         id: user.id,
         full_name: fullName.trim(),
         phone: phone.trim(),
@@ -74,8 +84,17 @@ export default function CustomerSignupScreen() {
 
       if (profileError) throw new Error(profileError.message);
 
-      Alert.alert('تم', `تم إنشاء حسابك بنجاح! حصلت على خصم ${PROMO_CUSTOMER_DISCOUNT} ${CURRENCY} على أول صيانة.`);
-      router.replace('/(tabs)');
+      // 3. التنبيه والتوجيه المباشر للرئيسية
+      Alert.alert(
+        'تم إنشاء الحساب',
+        `تم إنشاء حسابك بنجاح! حصلت على خصم ${PROMO_CUSTOMER_DISCOUNT} ${CURRENCY} على أول صيانة.`,
+        [
+          {
+            text: 'حسناً',
+            onPress: () => router.replace('/(tabs)'),
+          },
+        ]
+      );
     } catch (err: any) {
       setError(err.message || 'حدث خطأ أثناء إنشاء الحساب');
     } finally {
@@ -223,7 +242,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Cairo-Bold',
     fontSize: 24,
     marginBottom: 16,
-  marginTop: 8,
+    marginTop: 8,
   },
   body: { padding: 24, paddingBottom: 40 },
   promoCard: {

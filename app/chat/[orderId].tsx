@@ -20,6 +20,7 @@ export default function ChatScreen() {
   const [otherParty, setOtherParty] = useState<Profile | null>(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sendingImage, setSendingImage] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   const loadData = useCallback(async () => {
@@ -54,7 +55,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!orderId) return;
-    const channel = supabase.channel(`chat-${orderId}`)
+    const channel = supabase.channel(`chat-screen-${orderId}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `order_id=eq.${orderId}` },
         (payload) => {
@@ -94,30 +95,37 @@ export default function ChatScreen() {
 
   const sendImage = async (imageUri: string) => {
     if (!profile || !order || !otherParty) return;
-    await supabase.from('chat_messages').insert({
-      order_id: orderId,
-      sender_id: profile.id,
-      receiver_id: otherParty.id,
-      body: '',
-      image_url: imageUri,
-    });
+    setSendingImage(true);
+    try {
+      await supabase.from('chat_messages').insert({
+        order_id: orderId,
+        sender_id: profile.id,
+        receiver_id: otherParty.id,
+        body: '',
+        image_url: imageUri,
+      });
+    } catch (e: any) {
+      Alert.alert('خطأ', 'فشل إرسال الصورة');
+    } finally {
+      setSendingImage(false);
+    }
   };
 
   const pickAndSendImage = async () => {
     if (!profile || !otherParty) return;
 
     if (Platform.OS === 'web') {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.onchange = (e: any) => {
+      const inputEl = document.createElement('input');
+      inputEl.type = 'file';
+      inputEl.accept = 'image/*';
+      inputEl.onchange = (e: any) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onloadend = () => sendImage(reader.result as string);
         reader.readAsDataURL(file);
       };
-      input.click();
+      inputEl.click();
       return;
     }
 
@@ -127,7 +135,7 @@ export default function ChatScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.6,
       base64: true,
     });
@@ -157,7 +165,7 @@ export default function ChatScreen() {
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       <View style={[styles.header, { backgroundColor: colors.headerBg, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -213,8 +221,12 @@ export default function ChatScreen() {
       </ScrollView>
 
       <View style={[styles.inputBar, { backgroundColor: colors.headerBg, borderTopColor: colors.border }]}>
-        <TouchableOpacity style={[styles.cameraBtn, { backgroundColor: colors.inputBg }]} onPress={pickAndSendImage}>
-          <Camera color={colors.subtext} size={22} />
+        <TouchableOpacity 
+          style={[styles.cameraBtn, { backgroundColor: colors.inputBg }]} 
+          onPress={pickAndSendImage}
+          disabled={sendingImage}
+        >
+          <Camera color={sendingImage ? colors.primary : colors.subtext} size={22} />
         </TouchableOpacity>
         <TextInput
           style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.inputBorder }]}

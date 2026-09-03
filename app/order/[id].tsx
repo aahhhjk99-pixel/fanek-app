@@ -31,6 +31,12 @@ export default function OrderDetailScreen() {
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [submittingDispute, setSubmittingDispute] = useState(false);
+
+  // حالات نافذة إلغاء الطلب
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadOrder = useCallback(async () => {
@@ -105,11 +111,31 @@ export default function OrderDetailScreen() {
     }
   };
 
-  const cancelOrder = () => {
-    Alert.alert('إلغاء الطلب', 'هل أنت متأكد من إلغاء هذا الطلب؟', [
-      { text: 'إلغاء', style: 'cancel' },
-      { text: 'تأكيد الإلغاء', style: 'destructive', onPress: () => updateStatus('cancelled') },
-    ]);
+  // دالة تأكيد إلغاء الطلب مع حفظ السبب والشخص الذي قام بالإلغاء
+  const handleConfirmCancel = async () => {
+    if (!order || !cancelReason.trim()) {
+      show('الرجاء إدخال سبب الإلغاء', 'error');
+      return;
+    }
+    setSubmittingCancel(true);
+    try {
+      const { error } = await supabase.from('orders').update({
+        status: 'cancelled',
+        cancellation_reason: cancelReason.trim(),
+        cancelled_by: profile?.role || 'user',
+      }).eq('id', order.id);
+
+      if (error) throw error;
+
+      show('تم إلغاء الطلب بنجاح', 'success');
+      setShowCancelModal(false);
+      setCancelReason('');
+      loadOrder();
+    } catch (err: any) {
+      show(err.message || 'فشل إلغاء الطلب', 'error');
+    } finally {
+      setSubmittingCancel(false);
+    }
   };
 
   const issueInvoice = async () => {
@@ -210,7 +236,6 @@ export default function OrderDetailScreen() {
   const isTechnician = profile?.role === 'technician';
   const isAdmin = profile?.role === 'admin';
   const statusColor = ORDER_STATUS_COLORS[order.status];
-  const currentStepIndex = ORDER_STATUS_FLOW.indexOf(order.status);
   const dist = profile?.location_lat && techLocation
     ? calculateDistance(profile.location_lat, profile.location_lng!, techLocation.lat, techLocation.lng)
     : null;
@@ -231,6 +256,14 @@ export default function OrderDetailScreen() {
             <Text style={styles.statusBadgeText}>{ORDER_STATUS_LABELS[order.status]}</Text>
           </View>
           <Text style={[styles.orderTime, { color: colors.subtext }]}>تم الإنشاء {timeAgo(order.created_at)}</Text>
+          
+          {/* إظهار سبب الإلغاء إذا كان الطلب ملغياً */}
+          {order.status === 'cancelled' && (order as any).cancellation_reason && (
+            <View style={styles.cancellationReasonBox}>
+              <Text style={styles.cancellationReasonTitle}>سبب الإلغاء:</Text>
+              <Text style={styles.cancellationReasonText}>{(order as any).cancellation_reason}</Text>
+            </View>
+          )}
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
@@ -415,15 +448,16 @@ export default function OrderDetailScreen() {
           </View>
         )}
 
-        {/* Cancel button */}
-        {!['completed', 'cancelled'].includes(order.status) && (isCustomer || isAdmin) && (
-          <TouchableOpacity style={[styles.cancelBtn, { backgroundColor: colors.blockedBg, borderColor: colors.blockedBorder }]} onPress={cancelOrder}>
+        {/* Cancel button - متاح الآن للزبون والفني والأدمن */}
+        {!['completed', 'cancelled'].includes(order.status) && (isCustomer || isTechnician || isAdmin) && (
+          <TouchableOpacity style={[styles.cancelBtn, { backgroundColor: colors.blockedBg, borderColor: colors.blockedBorder }]} onPress={() => setShowCancelModal(true)}>
             <XCircle color={colors.error} size={18} />
             <Text style={[styles.cancelBtnText, { color: colors.error }]}>إلغاء الطلب</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
 
+      {/* Modal الاعتراض على الفاتورة */}
       <Modal visible={showDisputeModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
@@ -454,6 +488,38 @@ export default function OrderDetailScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal إلغاء الطلب الجديد والمطلوب */}
+      <Modal visible={showCancelModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>إلغاء الطلب</Text>
+              <TouchableOpacity onPress={() => { setShowCancelModal(false); setCancelReason(''); }}>
+                <Text style={[styles.modalClose, { color: colors.subtext }]}>إغلاق</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.modalLabel, { color: colors.subtext }]}>الرجاء إدخال سبب الإلغاء (مطلوب)</Text>
+            <TextInput
+              style={[styles.disputeInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.inputBorder }]}
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              placeholder="اكتب سبب إلغاء هذا الطلب..."
+              placeholderTextColor={colors.subtext}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+            <TouchableOpacity
+              style={[styles.submitDisputeBtn, { backgroundColor: colors.error }, (!cancelReason.trim() || submittingCancel) && { opacity: 0.6 }]}
+              onPress={handleConfirmCancel}
+              disabled={!cancelReason.trim() || submittingCancel}
+            >
+              <Text style={styles.submitDisputeBtnText}>{submittingCancel ? 'جاري الإلغاء...' : 'تأكيد الإلغاء'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -468,6 +534,9 @@ const styles = StyleSheet.create({
   statusBadge: { borderRadius: 10, paddingHorizontal: 16, paddingVertical: 6 },
   statusBadgeText: { fontFamily: 'Cairo-Bold', fontSize: 14, color: '#fff' },
   orderTime: { fontFamily: 'Cairo-Regular', fontSize: 12 },
+  cancellationReasonBox: { marginTop: 8, padding: 10, backgroundColor: '#fef2f2', borderRadius: 8, borderWidth: 1, borderColor: '#fecaca', width: '100%' },
+  cancellationReasonTitle: { fontFamily: 'Cairo-Bold', fontSize: 13, color: '#ef4444' },
+  cancellationReasonText: { fontFamily: 'Cairo-Regular', fontSize: 13, color: '#991b1b', marginTop: 2 },
   section: { borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1 },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   sectionTitle: { fontFamily: 'Cairo-SemiBold', fontSize: 16 },

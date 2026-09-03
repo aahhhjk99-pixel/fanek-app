@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronRight, Phone, Star } from 'lucide-react-native';
+import { ChevronRight, Phone, Star, Check } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/lib/theme-context';
 import { useToast } from '@/lib/toast';
@@ -16,6 +16,7 @@ export default function LoginScreen() {
   const { show } = useToast();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -36,6 +37,13 @@ export default function LoginScreen() {
       });
 
       if (signInError) throw new Error('رقم الهاتف أو كلمة المرور غير صحيحة');
+
+      // إدارة خيار تذكرني دائماً على مستوى المتصفح/التطبيق
+      if (!rememberMe && Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.sessionStorage.setItem('no_remember', 'true');
+      } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('no_remember');
+      }
 
       if (cleanPhone === ADMIN_PHONE) {
         const { data: profileData } = await supabase
@@ -105,6 +113,18 @@ export default function LoginScreen() {
           />
         </View>
 
+        {/* خيار تذكرني دائماً */}
+        <TouchableOpacity
+          style={styles.rememberMeRow}
+          onPress={() => setRememberMe(!rememberMe)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+            {rememberMe && <Check color="#fff" size={14} />}
+          </View>
+          <Text style={[styles.rememberMeText, { color: colors.text }]}>تذكرني دائماً</Text>
+        </TouchableOpacity>
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity
@@ -164,7 +184,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
-  inputGroup: { marginBottom: 20 },
+  inputGroup: { marginBottom: 16 },
   label: {
     fontFamily: 'Cairo-Medium',
     fontSize: 14,
@@ -191,6 +211,30 @@ const styles = StyleSheet.create({
     fontFamily: 'Cairo-Regular',
     fontSize: 16,
     textAlign: 'left',
+  },
+  rememberMeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#9ca3af',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  rememberMeText: {
+    fontFamily: 'Cairo-Regular',
+    fontSize: 14,
   },
   errorText: {
     fontFamily: 'Cairo-Regular',

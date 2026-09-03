@@ -68,7 +68,7 @@ export default function OrderDetailScreen() {
 
   useEffect(() => { loadOrder(); }, [loadOrder]);
 
-  // Live location tracking for customer when order is active
+  // تتبع موقع الفني المباشر
   useEffect(() => {
     if (!order?.technician_id || profile?.role !== 'customer') return;
     const isActive = ['accepted', 'en_route', 'arrived', 'in_progress'].includes(order.status);
@@ -86,10 +86,10 @@ export default function OrderDetailScreen() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [order?.technician_id, order?.status, profile?.role]);
 
-  // Realtime subscription for order status changes
+  // الاشتراك اللحظي للتغيرات
   useEffect(() => {
     if (!id) return;
-    const channel = supabase.channel(`order-${id}`)
+    const channel = supabase.channel(`order-detail-${id}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${id}` },
         () => { loadOrder(); }
@@ -111,7 +111,6 @@ export default function OrderDetailScreen() {
     }
   };
 
-  // دالة تأكيد إلغاء الطلب مع حفظ السبب والشخص الذي قام بالإلغاء
   const handleConfirmCancel = async () => {
     if (!order || !cancelReason.trim()) {
       show('الرجاء إدخال سبب الإلغاء', 'error');
@@ -257,7 +256,6 @@ export default function OrderDetailScreen() {
           </View>
           <Text style={[styles.orderTime, { color: colors.subtext }]}>تم الإنشاء {timeAgo(order.created_at)}</Text>
           
-          {/* إظهار سبب الإلغاء إذا كان الطلب ملغياً */}
           {order.status === 'cancelled' && (order as any).cancellation_reason && (
             <View style={styles.cancellationReasonBox}>
               <Text style={styles.cancellationReasonTitle}>سبب الإلغاء:</Text>
@@ -280,7 +278,6 @@ export default function OrderDetailScreen() {
           </View>
         </View>
 
-        {/* Live location tracking for customer */}
         {isCustomer && order.technician_id && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(order.status) && (
           <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.primary }]}>
             <View style={styles.sectionRow}>
@@ -315,7 +312,6 @@ export default function OrderDetailScreen() {
           </Text>
         </View>
 
-        {/* People info */}
         <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <View style={styles.personRow}>
             <Text style={[styles.personLabel, { color: colors.subtext }]}>الزبون:</Text>
@@ -327,7 +323,6 @@ export default function OrderDetailScreen() {
           </View>
         </View>
 
-        {/* Invoice */}
         {invoice && (
           <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
             <View style={styles.sectionRow}>
@@ -358,7 +353,6 @@ export default function OrderDetailScreen() {
           </View>
         )}
 
-        {/* Technician invoice form */}
         {isTechnician && order.status === 'work_done' && !invoice && (
           <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>إصدار فاتورة</Text>
@@ -392,7 +386,6 @@ export default function OrderDetailScreen() {
           </View>
         )}
 
-        {/* Action buttons */}
         <View style={styles.actionsContainer}>
           {order.technician_id && (
             <TouchableOpacity style={[styles.chatBtn, { backgroundColor: colors.primaryLight }]} onPress={() => router.push(`/chat/${order.id}`)}>
@@ -408,7 +401,6 @@ export default function OrderDetailScreen() {
           )}
         </View>
 
-        {/* Technician status flow buttons */}
         {isTechnician && order.technician_id === profile?.id && !['completed', 'cancelled', 'disputed'].includes(order.status) && (
           <View style={styles.statusActions}>
             {order.status === 'accepted' && (
@@ -434,7 +426,6 @@ export default function OrderDetailScreen() {
           </View>
         )}
 
-        {/* Customer payment confirmation */}
         {isCustomer && order.status === 'invoice_issued' && invoice && !invoice.locked && (
           <View style={styles.statusActions}>
             <TouchableOpacity style={[styles.statusBtn, { backgroundColor: colors.success }]} onPress={confirmPayment}>
@@ -448,7 +439,6 @@ export default function OrderDetailScreen() {
           </View>
         )}
 
-        {/* Cancel button - متاح الآن للزبون والفني والأدمن */}
         {!['completed', 'cancelled'].includes(order.status) && (isCustomer || isTechnician || isAdmin) && (
           <TouchableOpacity style={[styles.cancelBtn, { backgroundColor: colors.blockedBg, borderColor: colors.blockedBorder }]} onPress={() => setShowCancelModal(true)}>
             <XCircle color={colors.error} size={18} />
@@ -489,7 +479,7 @@ export default function OrderDetailScreen() {
         </View>
       </Modal>
 
-      {/* Modal إلغاء الطلب الجديد والمطلوب */}
+      {/* Modal إلغاء الطلب */}
       <Modal visible={showCancelModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>

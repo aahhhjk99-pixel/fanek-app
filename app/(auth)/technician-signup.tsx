@@ -2,14 +2,17 @@ import { useState } from 'react';
 import { router } from 'expo-router';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  Platform, Image,
+  Platform, Image, Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronRight, Phone, MapPin, Check, Camera, FileText, Star } from 'lucide-react-native';
+import { ChevronRight, Phone, MapPin, Check, Camera, FileText, Star, MessageCircle } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { CURRENCY, PROMO_TECHNICIAN_BONUS, COMMISSION_RATE, TERMS_TEXT, BRAND_NAME, BRAND_LOGO, SERVICE_CATEGORIES } from '@/lib/constants';
 import { useTheme } from '@/lib/theme-context';
+
+// رقم الواتساب الخاص بالإدارة المخصص لاستلام الصور والوثائق
+const ADMIN_WHATSAPP = '218910000000';
 
 export default function TechnicianSignupScreen() {
   const { colors } = useTheme();
@@ -45,6 +48,7 @@ export default function TechnicianSignupScreen() {
     }
   };
 
+  // دالة اختيار وضغط الصور لتلائم قاعدة البيانات
   const pickImage = async (type: 'id' | 'work') => {
     if (Platform.OS === 'web') {
       const input = document.createElement('input');
@@ -54,15 +58,26 @@ export default function TechnicianSignupScreen() {
         const file = e.target.files[0];
         if (file) {
           const reader = new FileReader();
-          reader.onloadend = () => {
-            const result = reader.result as string;
-            if (type === 'id') {
-              setIdPhoto(result);
-            } else {
-              if (workPhotos.length < 3) {
-                setWorkPhotos([...workPhotos, result]);
+          reader.onload = (event) => {
+            const img = new (window as any).Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+              // ضغط أبعاد الصور في الويب لمنع الخطأ
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 600;
+              const scaleFactor = MAX_WIDTH / (img.width || 1);
+              canvas.width = MAX_WIDTH;
+              canvas.height = (img.height || 1) * scaleFactor;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.4);
+
+              if (type === 'id') {
+                setIdPhoto(compressedBase64);
+              } else if (workPhotos.length < 3) {
+                setWorkPhotos((prev) => [...prev, compressedBase64]);
               }
-            }
+            };
           };
           reader.readAsDataURL(file);
         }
@@ -79,7 +94,8 @@ export default function TechnicianSignupScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
+      quality: 0.3,
+      allowsEditing: true,
       base64: true,
     });
 
@@ -90,7 +106,7 @@ export default function TechnicianSignupScreen() {
     if (type === 'id') {
       setIdPhoto(uri);
     } else if (workPhotos.length < 3) {
-      setWorkPhotos([...workPhotos, uri]);
+      setWorkPhotos((prev) => [...prev, uri]);
     }
   };
 
@@ -101,7 +117,7 @@ export default function TechnicianSignupScreen() {
     if (!password.trim() || password.length < 6) { setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return; }
     if (!specialty) { setError('الرجاء اختيار التخصص'); return; }
     if (!lat || !lng) { setError('الرجاء تحديد موقعك الجغرافي'); return; }
-    if (!idPhoto) { setError('الرجاء رفع صورة الهوية الوطنية'); return; }
+    if (!idPhoto) { setError('الرجاء رفع صورة الهوية الوطنية أو إرسالها عبر الواتساب'); return; }
     if (workPhotos.length < 3) { setError('الرجاء رفع 3 صور لأعمال سابقة'); return; }
     if (!agreed) { setError('الرجاء الموافقة على الشروط والأحكام'); return; }
 
@@ -166,7 +182,7 @@ export default function TechnicianSignupScreen() {
         description: `رصيد افتتاحي مجاني (${PROMO_TECHNICIAN_BONUS} ${CURRENCY})`,
       });
 
-      // 5. التوجيه لصفحة تسجيل الدخول حتى لا يرفضه Auth Guard أثناء المراجعة
+      // 5. التوجيه لصفحة تسجيل الدخول
       Alert.alert(
         'تم التسجيل',
         `تم إنشاء حسابك بنجاح! تم إضافة ${PROMO_TECHNICIAN_BONUS} ${CURRENCY} رصيد مجاني إلى محفظتك. حسابك حالياً قيد المراجعة من الإدارة.`,
@@ -337,6 +353,28 @@ export default function TechnicianSignupScreen() {
           </View>
         </View>
 
+        {/* بطاقة توجيه للواتساب لإرسال المستندات */}
+        <View style={[styles.whatsappCard, { backgroundColor: colors.cardBg, borderColor: '#22c55e' }]}>
+          <View style={styles.whatsappHeader}>
+            <MessageCircle color="#22c55e" size={22} />
+            <Text style={[styles.whatsappTitle, { color: colors.text }]}>طريقة إضافية: إرسال الصور عبر الواتساب</Text>
+          </View>
+          <Text style={[styles.whatsappDesc, { color: colors.subtext }]}>
+            إذا واجهت أي صعوبة في رفع الصور، يمكنك إرسال صورة الهوية الوطنية وصور الأعمال وسيرتك الذاتية مباشرة إلى إدارة التطبيق عبر الواتساب:
+          </Text>
+          <TouchableOpacity
+            style={styles.whatsappBtn}
+            onPress={() => {
+              const formattedPhone = ADMIN_WHATSAPP.replace(/[^0-9]/g, '');
+              const message = encodeURIComponent(`أهلاً إدارة ${BRAND_NAME}، أرغب في إرسال الوثائق والصور الخاصة بتسجيل حسابي كفني (الاسم: ${fullName || 'فني جديد'} - الهاتف: ${phone || 'غير مدخل'}).`);
+              Linking.openURL(`https://wa.me/${formattedPhone}?text=${message}`);
+            }}
+          >
+            <MessageCircle color="#fff" size={18} />
+            <Text style={styles.whatsappBtnText}>إرسال الوثائق عبر الواتساب ({ADMIN_WHATSAPP})</Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity style={styles.termsRow} onPress={() => setShowTerms(true)}>
           <View style={[styles.checkbox, agreed && [styles.checkboxActive, { backgroundColor: colors.success, borderColor: colors.success }]]}>
             {agreed && <Check color="#fff" size={16} />}
@@ -488,6 +526,43 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   uploadTextSmall: { fontFamily: 'Cairo-Regular', fontSize: 12 },
+  whatsappCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 20,
+  },
+  whatsappHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  whatsappTitle: {
+    fontFamily: 'Cairo-Bold',
+    fontSize: 14,
+  },
+  whatsappDesc: {
+    fontFamily: 'Cairo-Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  whatsappBtn: {
+    backgroundColor: '#22c55e',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  whatsappBtnText: {
+    fontFamily: 'Cairo-Bold',
+    fontSize: 14,
+    color: '#fff',
+  },
   termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
   checkbox: {
     width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#d1d5db',

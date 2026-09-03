@@ -48,9 +48,14 @@ export default function ProfileScreen() {
         text: 'خروج',
         style: 'destructive',
         onPress: async () => {
-          await signOut();
-          show('تم تسجيل الخروج', 'info');
-          router.replace('/(auth)/login');
+          try {
+            await supabase.auth.signOut();
+            if (signOut) await signOut();
+            show('تم تسجيل الخروج', 'info');
+            router.replace('/(auth)/login');
+          } catch (err: any) {
+            show('حدث خطأ أثناء تسجيل الخروج', 'error');
+          }
         },
       },
     ]);
@@ -67,11 +72,18 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteAccount();
-              show('تم حذف الحساب', 'info');
+              if (profile?.id) {
+                // 1. حذف سجل الملف الشخصي من القاعدة
+                await supabase.from('profiles').delete().eq('id', profile.id);
+              }
+              // 2. استدعاء دالة الحذف المتاحة واستفراغ الجلسة
+              if (deleteAccount) await deleteAccount();
+              await supabase.auth.signOut();
+              
+              show('تم حذف الحساب بنجاح', 'info');
               router.replace('/(auth)/login');
             } catch (err: any) {
-              show('فشل حذف الحساب', 'error');
+              show(err.message || 'فشل حذف الحساب', 'error');
             }
           },
         },
@@ -94,7 +106,7 @@ export default function ProfileScreen() {
         <View style={[styles.profileCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <View style={[styles.avatar, { backgroundColor: roleColor + '20' }]}>
             <Text style={[styles.avatarText, { color: roleColor }]}>
-              {profile.full_name.charAt(0)}
+              {profile.full_name ? profile.full_name.charAt(0) : 'U'}
             </Text>
           </View>
           {!editing ? (

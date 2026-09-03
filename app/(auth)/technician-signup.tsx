@@ -12,7 +12,7 @@ import { CURRENCY, PROMO_TECHNICIAN_BONUS, COMMISSION_RATE, TERMS_TEXT, BRAND_NA
 import { useTheme } from '@/lib/theme-context';
 
 // رقم الواتساب الخاص بالإدارة المخصص لاستلام الصور والوثائق
-const ADMIN_WHATSAPP = '218910000000';
+const ADMIN_WHATSAPP = '218930656956';
 
 export default function TechnicianSignupScreen() {
   const { colors } = useTheme();

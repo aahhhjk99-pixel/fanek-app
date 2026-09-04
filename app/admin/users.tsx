@@ -45,19 +45,28 @@ export default function AdminUsersScreen() {
     return u.full_name?.toLowerCase().includes(q) || (u.phone || '').includes(q);
   });
 
+  // إصلاح دالة الحظر لتقوم بتحديث الخيارين account_status و is_banned
   const handleBan = (user: Profile) => {
-    const action = user.account_status === 'banned' ? 'فك الحظر' : 'حظر';
+    const currentlyBanned = user.account_status === 'banned' || (user as any).is_banned === true;
+    const action = currentlyBanned ? 'فك الحظر' : 'حظر';
+
     Alert.alert(action, `هل تريد ${action} "${user.full_name}"؟`, [
       { text: 'إلغاء', style: 'cancel' },
       {
         text: action,
-        style: 'destructive',
+        style: currentlyBanned ? 'default' : 'destructive',
         onPress: async () => {
-          const newStatus = user.account_status === 'banned' ? 'active' : 'banned';
+          const newStatus = currentlyBanned ? 'active' : 'banned';
+          const isBannedVal = !currentlyBanned;
+
           const { error } = await supabase
             .from('profiles')
-            .update({ account_status: newStatus })
+            .update({ 
+              account_status: newStatus,
+              is_banned: isBannedVal 
+            })
             .eq('id', user.id);
+
           if (error) {
             Alert.alert('خطأ', error.message);
           } else {
@@ -68,6 +77,7 @@ export default function AdminUsersScreen() {
     ]);
   };
 
+  // إصلاح دالة الحذف مع توفير fallback في حال عدم تعيين Edge Function
   const handleDelete = (user: Profile) => {
     Alert.alert(
       'حذف حساب',
@@ -78,22 +88,43 @@ export default function AdminUsersScreen() {
           text: 'حذف',
           style: 'destructive',
           onPress: async () => {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const token = sessionData.session?.access_token;
-            const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
             try {
-              const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ userId: user.id }),
-              });
-              const result = await response.json();
-              if (!response.ok || result.error) {
-                throw new Error(result.error || 'فشل حذف الحساب');
+              const { data: sessionData } = await supabase.auth.getSession();
+              const token = sessionData.session?.access_token;
+              const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+              
+              let deleted = false;
+
+              // محاولة الحذف عبر Edge Function
+              if (supabaseUrl && token) {
+                try {
+                  const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ userId: user.id }),
+                  });
+                  const result = await response.json();
+                  if (response.ok && !result.error) {
+                    deleted = true;
+                  }
+                } catch (e) {
+                  // في حال فشل Edge Function سنمر للحذف المباشر
+                }
               }
+
+              // إذا لم يتم الحذف عبر Edge Function، يتم الحذف المباشر من جدول Profiles
+              if (!deleted) {
+                const { error: deleteError } = await supabase
+                  .from('profiles')
+                  .delete()
+                  .eq('id', user.id);
+
+                if (deleteError) throw deleteError;
+              }
+
               loadUsers();
             } catch (err: any) {
               Alert.alert('خطأ', err.message || 'فشل حذف الحساب');
@@ -185,7 +216,7 @@ export default function AdminUsersScreen() {
           <Text style={[styles.emptyText, { color: colors.subtext }]}>لا توجد حسابات</Text>
         ) : (
           filteredUsers.map((user) => {
-            const isBanned = user.account_status === 'banned';
+            const isBanned = user.account_status === 'banned' || (user as any).is_banned === true;
             const rColor = roleColor(user.role);
             const currentCommission = (user as any).commission_rate ?? 10.0;
 

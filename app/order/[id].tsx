@@ -100,6 +100,22 @@ export default function OrderDetailScreen() {
 
   const updateStatus = async (status: any) => {
     if (!order) return;
+
+    // التحقق من رصيد المحفظة قبل قبول الطلب
+    if (status === 'accepted') {
+      const { data: techProfile } = await supabase
+        .from('profiles')
+        .select('wallet_balance')
+        .eq('id', profile?.id)
+        .maybeSingle();
+
+      const currentWallet = (techProfile as any)?.wallet_balance ?? 0;
+      if (currentWallet <= 0) {
+        show('رصيدك الحالي غير كافٍ لاستقبال طلبات جديدة. يرجى شحن المحفظة أولاً.', 'error');
+        return;
+      }
+    }
+
     const updates: any = { status };
     if (status === 'completed') updates.completed_at = new Date().toISOString();
     const { error } = await supabase.from('orders').update(updates).eq('id', order.id);
@@ -149,7 +165,11 @@ export default function OrderDetailScreen() {
     const now = new Date();
     const isExempt = !!profile.commission_exempt &&
       (!profile.commission_exempt_until || new Date(profile.commission_exempt_until) > now);
-    const rate = isExempt ? 0 : (profile.commission_rate ?? COMMISSION_RATE) / 100;
+
+    // استخدام نسبة العمولة المخصصة إن وجدت وإلا العمولة العامة
+    const customRate = (profile as any)?.custom_commission_rate;
+    const effectiveRate = customRate ?? profile.commission_rate ?? COMMISSION_RATE;
+    const rate = isExempt ? 0 : effectiveRate / 100;
     const commission = total * rate;
 
     const { error } = await supabase.from('invoices').insert({
@@ -167,15 +187,24 @@ export default function OrderDetailScreen() {
     if (error) {
       show('فشل إصدار الفاتورة', 'error');
     } else {
-      // خصم العمولة من محفظة الفني
+      // خصم العمولة من محفظة الفني والتأكد من دعم النزول بالسالب
       if (commission > 0) {
-        const { error: rpcError } = await supabase.rpc('deduct_tech_commission', {
-          p_technician_id: profile.id,
-          p_commission_amount: commission,
-        });
+        const { data: techData } = await supabase
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('id', profile.id)
+          .maybeSingle();
 
-        if (rpcError) {
-          console.error('خطأ أثناء خصم العمولة من المحفظة:', rpcError);
+        const currentBalance = (techData as any)?.wallet_balance ?? 0;
+        const newBalance = currentBalance - commission;
+
+        const { error: walletError } = await supabase
+          .from('profiles')
+          .update({ wallet_balance: newBalance })
+          .eq('id', profile.id);
+
+        if (walletError) {
+          console.error('خطأ أثناء خصم العمولة من المحفظة:', walletError);
         }
       }
 
@@ -356,7 +385,7 @@ export default function OrderDetailScreen() {
               <Text style={[styles.invoiceTotalValue, { color: colors.primary }]}>{formatCurrency(invoice.total)}</Text>
             </View>
             <View style={styles.invoiceRow}>
-              <Text style={[styles.invoiceLabel, { color: colors.subtext }]}>العمولة (10%):</Text>
+              <Text style={[styles.invoiceLabel, { color: colors.subtext }]}>العمولة:</Text>
               <Text style={[styles.invoiceValue, { color: colors.subtext }]}>{formatCurrency(invoice.commission_amount)}</Text>
             </View>
             <View style={[styles.invoiceStatusBadge, { backgroundColor: (invoice.status === 'paid' ? colors.success : invoice.status === 'frozen' ? colors.error : colors.warning) + '20' }]}>

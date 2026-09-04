@@ -5,7 +5,7 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider } from '@/lib/auth';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { ToastProvider } from '@/lib/toast';
-import { I18nManager } from 'react-native';
+import { I18nManager, ActivityIndicator, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Cairo_400Regular,
@@ -14,7 +14,8 @@ import {
   Cairo_700Bold,
 } from '@expo-google-fonts/cairo';
 import * as SplashScreen from 'expo-splash-screen';
-import { ActivityIndicator, View } from 'react-native';
+import { supabase } from '@/lib/supabase';
+import { registerForPushNotificationsAsync } from '@/lib/notifications';
 
 I18nManager.forceRTL(true);
 
@@ -41,6 +42,15 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
+  // تسجيل رمز الإشعارات للهاتف عند فتح التطبيق والتأكد من تسجيل الدخول
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        registerForPushNotificationsAsync(user.id);
+      }
+    });
+  }, []);
+
   if (!fontsLoaded && !fontError) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -53,21 +63,22 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="support" />
-          <Stack.Screen name="order/[id]" />
-          <Stack.Screen name="wallet" />
-          <Stack.Screen name="ledger" />
-          <Stack.Screen name="dispute/[id]" />
-          <Stack.Screen name="admin" />
-          <Stack.Screen name="admin/users" />
-          <Stack.Screen name="admin/support-config" />
-          <Stack.Screen name="chat/[orderId]" />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <RootStatusBar />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="support" />
+            <Stack.Screen name="order/[id]" />
+            <Stack.Screen name="wallet" />
+            <Stack.Screen name="ledger" />
+            <Stack.Screen name="dispute/[id]" />
+            <Stack.Screen name="admin" />
+            <Stack.Screen name="admin/users" />
+            <Stack.Screen name="admin/support-config" />
+            <Stack.Screen name="admin/notifications" />
+            <Stack.Screen name="chat/[orderId]" />
+            <Stack.Screen name="+not-found" />
+          </Stack>
+          <RootStatusBar />
         </ToastProvider>
       </AuthProvider>
     </ThemeProvider>

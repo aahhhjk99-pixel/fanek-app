@@ -12,7 +12,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { supabase } from '@/lib/supabase';
 import { getServiceIcon } from '@/components/ServiceIcon';
 import { formatCurrency, calculateDistance, timeAgo } from '@/lib/format';
-import { ORDER_STATUS_LABELS, ORDER_STATUS_COLORS, BRAND_NAME, BRAND_LOGO, WARRANTY_TEXT } from '@/lib/constants';
+import { ORDER_STATUS_LABELS, ORDER_STATUS_COLORS, BRAND_NAME, BRAND_LOGO } from '@/lib/constants';
 import type { Order, Wallet } from '@/types/database';
 
 export default function TechnicianHome() {
@@ -23,6 +23,10 @@ export default function TechnicianHome() {
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // حساب الرصيد من الجدولين للضمان
+  const effectiveBalance = wallet?.balance ?? profile?.wallet_balance ?? 0;
+  const isBlocked = effectiveBalance <= 0;
 
   const loadData = useCallback(async () => {
     if (!profile) return;
@@ -44,7 +48,9 @@ export default function TechnicianHome() {
       .maybeSingle();
     setActiveOrder(active as Order | null);
 
-    if (profile.technician_status === 'available' && (walletData?.balance ?? 0) > 0) {
+    const currentBalance = walletData?.balance ?? profile.wallet_balance ?? 0;
+
+    if (profile.technician_status === 'available' && currentBalance > 0) {
       const { data: newOrders } = await supabase
         .from('orders')
         .select(`*, service:services(*), customer:profiles!orders_customer_id_fkey(*)`)
@@ -65,8 +71,8 @@ export default function TechnicianHome() {
   const toggleStatus = async () => {
     if (!profile) return;
     const newStatus = profile.technician_status === 'available' ? 'offline' : 'available';
-    if ((wallet?.balance ?? 0) <= 0 && newStatus === 'available') {
-      Alert.alert('تنبيه', 'رصيد محفظتك صفر. لا يمكنك استقبال طلبات جديدة. تواصل مع الدعم لشحن محفظتك.');
+    if (isBlocked && newStatus === 'available') {
+      Alert.alert('تنبيه', 'رصيد محفظتك غير كافٍ. لا يمكنك استقبال طلبات جديدة. يرجى شحن محفظتك أولاً.');
       return;
     }
     await supabase.from('profiles').update({ technician_status: newStatus }).eq('id', profile.id);
@@ -75,6 +81,13 @@ export default function TechnicianHome() {
 
   const acceptOrder = async (order: Order) => {
     if (!profile) return;
+
+    // حماية القبول السريع في حال كان الرصيد صفر أو أقل
+    if (isBlocked) {
+      Alert.alert('تنبيه', 'رصيدك الحالي غير كافٍ لقبول الطلبات. يرجى شحن المحفظة أولاً.');
+      return;
+    }
+
     const dist = profile.location_lat && order.location_lat
       ? calculateDistance(profile.location_lat, profile.location_lng!, order.location_lat, order.location_lng!)
       : null;
@@ -95,8 +108,6 @@ export default function TechnicianHome() {
   };
 
   const isAvailable = profile?.technician_status === 'available';
-  const balance = wallet?.balance ?? 0;
-  const isBlocked = balance <= 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -150,7 +161,7 @@ export default function TechnicianHome() {
         <View style={[styles.walletMiniCard, { backgroundColor: colors.walletCardBg }]}>
           <View style={styles.walletInfo}>
             <Text style={[styles.walletLabel, { color: 'rgba(255,255,255,0.8)' }]}>رصيد المحفظة</Text>
-            <Text style={[styles.walletBalance, { color: colors.walletCardText }]}>{formatCurrency(balance)}</Text>
+            <Text style={[styles.walletBalance, { color: colors.walletCardText }]}>{formatCurrency(effectiveBalance)}</Text>
           </View>
           <TouchableOpacity onPress={() => router.push('/wallet' as any)}>
             <ChevronLeft color={colors.walletCardText} size={20} />
@@ -161,7 +172,7 @@ export default function TechnicianHome() {
           <View style={[styles.blockedBanner, { backgroundColor: colors.blockedBg, borderColor: colors.blockedBorder }]}>
             <AlertCircle color={colors.error} size={20} />
             <Text style={[styles.blockedText, { color: colors.error }]}>
-              رصيدك صفر - لا يمكنك استقبال طلبات جديدة
+              رصيدك غير كافٍ ({formatCurrency(effectiveBalance)}) - لا يمكنك استقبال طلبات جديدة
             </Text>
           </View>
         )}

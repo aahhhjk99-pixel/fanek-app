@@ -1,65 +1,52 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, ActivityIndicator, Alert, RefreshControl
+  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator
 } from 'react-native';
-import { Bell, Send, Users, UserCheck, Wrench, Clock, Trash2 } from 'lucide-react-native';
-import { supabase } from '@/lib/supabase';
+import { router } from 'expo-router';
+import { ChevronLeft, Send, Bell } from 'lucide-react-native';
 import { useTheme } from '@/lib/theme-context';
-
-interface NotificationItem {
-  id: string;
-  title: string;
-  body: string;
-  target_type: 'all' | 'customers' | 'technicians';
-  created_at: string;
-}
+import { supabase } from '@/lib/supabase';
 
 export default function AdminNotificationsScreen() {
   const { colors } = useTheme();
-
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [targetType, setTargetType] = useState<'all' | 'customers' | 'technicians'>('all');
   const [sending, setSending] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [history, setHistory] = useState<NotificationItem[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // جلب سجل الإشعارات
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = async () => {
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setHistory(data || []);
-    } catch (err: any) {
-      Alert.alert('خطأ', err.message || 'فشل جلب سجل الإشعارات');
+      if (!error && data) {
+        setHistory(data);
+      }
+    } catch (e) {
+      console.error(e);
     } finally {
-      setLoadingHistory(false);
-      setRefreshing(false);
+      setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
     fetchHistory();
-  }, [fetchHistory]);
+  }, []);
 
-  // إرسال الإشعار
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) {
-      Alert.alert('تنبيه', 'يرجى كتابة عنوان الإشعار ونص الرسالة');
+      Alert.alert('تنبيه', 'يرجى كتابة عنوان الإشعار ونصل الرسالة');
       return;
     }
 
     setSending(true);
     try {
-      // 1. حفظ الإشعار في القاعدة
-      const { error } = await supabase
+      // 1. حفظ الإشعار في قاعدة البيانات
+      const { error: dbError } = await supabase
         .from('notifications')
         .insert({
           title: title.trim(),
@@ -67,9 +54,45 @@ export default function AdminNotificationsScreen() {
           target_type: targetType,
         });
 
-      if (error) throw error;
+      if (dbError) throw dbError;
 
-      Alert.alert('نجاح', 'تم إرسال وحفظ الإشعار بنجاح!');
+      // 2. جلب رموز الإشعارات (Push Tokens) للمستخدمين المستهدفين
+      let query = supabase.from('profiles').select('push_token').not('push_token', 'is', null);
+
+      if (targetType === 'customers') {
+        query = query.eq('role', 'customer');
+      } else if (targetType === 'technicians') {
+        query = query.eq('role', 'technician');
+      }
+
+      const { data: users, error: usersError } = await query;
+
+      if (!usersError && users && users.length > 0) {
+        const tokens = users.map(u => u.push_token).filter(Boolean);
+
+        // 3. إرسال الإشعار عبر سيرفر Expo لظهر على شاشة القفل
+        if (tokens.length > 0) {
+          const messages = tokens.map(token => ({
+            to: token,
+            sound: 'default',
+            title: title.trim(),
+            body: body.trim(),
+            data: { targetType },
+          }));
+
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Accept-encoding': 'gzip, deflate',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(messages),
+          });
+        }
+      }
+
+      Alert.alert('نجاح', 'تم إرسال الإشعار وحفظه بنجاح!');
       setTitle('');
       setBody('');
       fetchHistory();
@@ -80,102 +103,69 @@ export default function AdminNotificationsScreen() {
     }
   };
 
-  // حذف إشعار من السجل
-  const handleDelete = (id: string) => {
-    Alert.alert('حذف الإشعار', 'هل أنت متأكد من حذف هذا الإشعار من السجل؟', [
-      { text: 'إلغاء', style: 'cancel' },
-      {
-        text: 'حذف',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.from('notifications').delete().eq('id', id);
-          fetchHistory();
-        },
-      },
-    ]);
-  };
-
-  const getTargetBadge = (type: string) => {
-    switch (type) {
-      case 'customers':
-        return { label: 'الزبائن فقط', color: '#0284c7', icon: UserCheck };
-      case 'technicians':
-        return { label: 'الفنيين فقط', color: '#d97706', icon: Wrench };
-      default:
-        return { label: 'الجميع', color: '#16a34a', icon: Users };
-    }
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
-      {/* الهيدر */}
       <View style={[styles.header, { backgroundColor: colors.headerBg, borderBottomColor: colors.border }]}>
-        <Bell color={colors.primary} size={22} />
-        <Text style={[styles.headerTitle, { color: colors.text }]}>إدارة الإشعارات الجماعية</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <ChevronLeft color={colors.text} size={24} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>إدارة الإشعارات</Text>
+        <View style={{ width: 28 }} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.body}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchHistory} />}
-      >
-        {/* نموذج إنشاء إشعار */}
+      <ScrollView contentContainerStyle={styles.body}>
         <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>إرسال إشعار جديد</Text>
-
-          {/* تحديد الوجهة */}
-          <Text style={[styles.label, { color: colors.subtext }]}>إرسال إلى:</Text>
+          <Text style={[styles.label, { color: colors.text }]}>الجمهور المستهدف</Text>
           <View style={styles.targetRow}>
             {[
-              { id: 'all', label: 'الجميع', icon: Users },
-              { id: 'customers', label: 'الزبائن', icon: UserCheck },
-              { id: 'technicians', label: 'الفنيين', icon: Wrench },
-            ].map((item) => {
-              const IconComp = item.icon;
-              const isSelected = targetType === item.id;
-              return (
-                <TouchableOpacity
-                  key={item.id}
+              { id: 'all', label: 'الجميع' },
+              { id: 'customers', label: 'الزبائن' },
+              { id: 'technicians', label: 'الفنيين' },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.targetBtn,
+                  { borderColor: colors.border },
+                  targetType === item.id && { backgroundColor: colors.primary, borderColor: colors.primary },
+                ]}
+                onPress={() => setTargetType(item.id as any)}
+              >
+                <Text
                   style={[
-                    styles.targetChip,
-                    { backgroundColor: isSelected ? colors.primary : colors.chipBg, borderColor: colors.border }
+                    styles.targetBtnText,
+                    { color: colors.text },
+                    targetType === item.id && { color: '#fff' },
                   ]}
-                  onPress={() => setTargetType(item.id as any)}
                 >
-                  <IconComp color={isSelected ? '#fff' : colors.subtext} size={16} />
-                  <Text style={[styles.targetChipText, { color: isSelected ? '#fff' : colors.text }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          {/* عنوان الإشعار */}
-          <Text style={[styles.label, { color: colors.subtext }]}>عنوان الإشعار:</Text>
+          <Text style={[styles.label, { color: colors.text }]}>عنوان الإشعار</Text>
           <TextInput
-            style={[styles.input, { backgroundColor: colors.bg, color: colors.text, borderColor: colors.border }]}
-            placeholder="مثال: خصم خاص اليوم!"
+            style={[styles.input, { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text }]}
+            placeholder="أدخل عنوان الإشعار..."
             placeholderTextColor={colors.subtext}
             value={title}
             onChangeText={setTitle}
           />
 
-          {/* نص الإشعار */}
-          <Text style={[styles.label, { color: colors.subtext }]}>نص الرسالة:</Text>
+          <Text style={[styles.label, { color: colors.text }]}>نص الرسالة</Text>
           <TextInput
-            style={[styles.input, styles.textArea, { backgroundColor: colors.bg, color: colors.text, borderColor: colors.border }]}
-            placeholder="اكتب تفاصيل الإشعار هنا..."
+            style={[styles.input, styles.textArea, { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text }]}
+            placeholder="اكتب نص الإشعار هنا..."
             placeholderTextColor={colors.subtext}
             multiline
             numberOfLines={4}
-            textAlignVertical="top"
             value={body}
             onChangeText={setBody}
           />
 
-          {/* زر الإرسال */}
           <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: colors.primary }, sending && { opacity: 0.6 }]}
+            style={[styles.sendBtn, { backgroundColor: colors.primary }]}
             onPress={handleSend}
             disabled={sending}
           >
@@ -190,45 +180,27 @@ export default function AdminNotificationsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* سجل الإشعارات السابق */}
-        <View style={styles.historySection}>
-          <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>سجل الإشعارات المرسلة</Text>
-
-          {loadingHistory ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : history.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.subtext }]}>لا توجد إشعارات مرسلة سابقاً</Text>
-          ) : (
-            history.map((item) => {
-              const badge = getTargetBadge(item.target_type);
-              const BadgeIcon = badge.icon;
-              return (
-                <View key={item.id} style={[styles.historyCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-                  <View style={styles.historyHeader}>
-                    <View style={[styles.badge, { backgroundColor: badge.color + '15' }]}>
-                      <BadgeIcon color={badge.color} size={12} />
-                      <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
-                    </View>
-
-                    <TouchableOpacity onPress={() => handleDelete(item.id)}>
-                      <Trash2 color="#ef4444" size={16} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text style={[styles.historyTitle, { color: colors.text }]}>{item.title}</Text>
-                  <Text style={[styles.historyBody, { color: colors.subtext }]}>{item.body}</Text>
-
-                  <View style={styles.timeRow}>
-                    <Clock size={12} color={colors.subtext} />
-                    <Text style={[styles.timeText, { color: colors.subtext }]}>
-                      {new Date(item.created_at).toLocaleString('ar-LY')}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </View>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>سجل الإشعارات المرسلة</Text>
+        {loading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+        ) : history.length === 0 ? (
+          <Text style={{ color: colors.subtext, textAlign: 'center', marginTop: 20, fontFamily: 'Cairo-Regular' }}>
+            لا توجد إشعارات مرسلة سابقة
+          </Text>
+        ) : (
+          history.map((item) => (
+            <View key={item.id} style={[styles.historyCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+              <View style={styles.historyHeader}>
+                <Bell color={colors.primary} size={18} />
+                <Text style={[styles.historyTitle, { color: colors.text }]}>{item.title}</Text>
+              </View>
+              <Text style={[styles.historyBody, { color: colors.subtext }]}>{item.body}</Text>
+              <Text style={[styles.historyMeta, { color: colors.subtext }]}>
+                المستهدفين: {item.target_type === 'all' ? 'الجميع' : item.target_type === 'customers' ? 'الزبائن' : 'الفنيين'}
+              </Text>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -236,27 +208,23 @@ export default function AdminNotificationsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: 50, paddingBottom: 16, paddingHorizontal: 16, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  header: { paddingTop: 50, paddingBottom: 16, paddingHorizontal: 16, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  backBtn: { padding: 4 },
   headerTitle: { fontFamily: 'Cairo-Bold', fontSize: 18 },
-  body: { padding: 16, gap: 20 },
-  card: { borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
-  sectionTitle: { fontFamily: 'Cairo-Bold', fontSize: 16 },
-  label: { fontFamily: 'Cairo-Medium', fontSize: 13, marginTop: 4 },
-  targetRow: { flexDirection: 'row', gap: 8 },
-  targetChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
-  targetChipText: { fontFamily: 'Cairo-Bold', fontSize: 12 },
-  input: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, fontFamily: 'Cairo-Regular', fontSize: 14, textAlign: 'right' },
-  textArea: { height: 90 },
-  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10, marginTop: 8 },
+  body: { padding: 16, paddingBottom: 40 },
+  card: { padding: 16, borderRadius: 14, borderWidth: 1, marginBottom: 24 },
+  label: { fontFamily: 'Cairo-SemiBold', fontSize: 14, marginBottom: 8, marginTop: 10 },
+  targetRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  targetBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
+  targetBtnText: { fontFamily: 'Cairo-Medium', fontSize: 13 },
+  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontFamily: 'Cairo-Regular', fontSize: 14 },
+  textArea: { height: 100, textAlignVertical: 'top' },
+  sendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 10, marginTop: 20 },
   sendBtnText: { color: '#fff', fontFamily: 'Cairo-Bold', fontSize: 15 },
-  historySection: { gap: 10 },
-  emptyText: { fontFamily: 'Cairo-Regular', fontSize: 14, textAlign: 'center', marginVertical: 20 },
-  historyCard: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 8 },
-  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  badgeText: { fontFamily: 'Cairo-Bold', fontSize: 11 },
+  sectionTitle: { fontFamily: 'Cairo-SemiBold', fontSize: 18, marginBottom: 12 },
+  historyCard: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
+  historyHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   historyTitle: { fontFamily: 'Cairo-Bold', fontSize: 15 },
-  historyBody: { fontFamily: 'Cairo-Regular', fontSize: 13 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  timeText: { fontFamily: 'Cairo-Regular', fontSize: 11 },
+  historyBody: { fontFamily: 'Cairo-Regular', fontSize: 13, marginBottom: 6 },
+  historyMeta: { fontFamily: 'Cairo-Regular', fontSize: 11 },
 });

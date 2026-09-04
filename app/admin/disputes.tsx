@@ -37,6 +37,7 @@ export default function AdminDisputesScreen() {
       {
         text: 'تأكيد',
         onPress: async () => {
+          // 1. تحديث حالة النزاع
           const { error } = await supabase.from('disputes')
             .update({ status: resolution, resolved_at: new Date().toISOString() })
             .eq('id', dispute.id);
@@ -44,6 +45,8 @@ export default function AdminDisputesScreen() {
             show('فشل حل النزاع', 'error');
             return;
           }
+
+          // 2. تحديث الفاتورة
           if (dispute.invoice_id) {
             await supabase.from('invoices').update({
               locked: false,
@@ -51,13 +54,34 @@ export default function AdminDisputesScreen() {
               paid_at: resolution === 'resolved_technician' ? new Date().toISOString() : null,
             }).eq('id', dispute.invoice_id);
           }
+
+          // 3. تحديث حالة الطلب بشكل صحيح حسب الطرف الفائز
           if (dispute.order_id) {
             await supabase.from('orders').update({
-              status: 'completed',
-              completed_at: new Date().toISOString(),
+              status: resolution === 'resolved_customer' ? 'cancelled' : 'completed',
+              completed_at: resolution === 'resolved_technician' ? new Date().toISOString() : null,
             }).eq('id', dispute.order_id);
           }
-          show('تم حل النزاع', 'success');
+
+          // 4. إرجاع العمولة لمحفظة الفني إذا كان الحسم لصالح الزبون
+          if (resolution === 'resolved_customer') {
+            const invoiceData = (dispute as any).invoice;
+            const commissionAmount = invoiceData?.commission_amount || 0;
+            const techId = dispute.technician_id;
+
+            if (commissionAmount > 0 && techId) {
+              const { error: rpcError } = await supabase.rpc('refund_tech_commission', {
+                p_technician_id: techId,
+                p_commission_amount: commissionAmount,
+              });
+
+              if (rpcError) {
+                console.error('خطأ في استرجاع العمولة:', rpcError);
+              }
+            }
+          }
+
+          show('تم حل النزاع بنجاح', 'success');
           loadData();
         },
       },

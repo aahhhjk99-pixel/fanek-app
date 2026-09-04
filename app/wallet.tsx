@@ -1,10 +1,10 @@
+import { useState, useEffect, useCallback } from 'react';
 import { router } from 'expo-router';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { ChevronLeft, Wallet as WalletIcon, TrendingUp, Receipt } from 'lucide-react-native';
+import { ChevronLeft, Wallet as WalletIcon, TrendingUp, Receipt, AlertCircle } from 'lucide-react-native';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
-import { useState, useEffect, useCallback } from 'react';
 import { formatCurrency } from '@/lib/format';
 import type { Wallet } from '@/types/database';
 
@@ -23,7 +23,9 @@ export default function WalletScreen() {
 
   useEffect(() => { loadWallet(); }, [loadWallet]);
 
-  const balance = wallet?.balance ?? 0;
+  // قراءة الرصيد الفعلي وحالة التوقف
+  const effectiveBalance = wallet?.balance ?? profile?.wallet_balance ?? 0;
+  const isBlocked = effectiveBalance <= 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -41,7 +43,7 @@ export default function WalletScreen() {
             <WalletIcon color="rgba(255,255,255,0.8)" size={24} />
             <Text style={styles.balanceLabel}>الرصيد الحالي</Text>
           </View>
-          <Text style={[styles.balanceAmount, { color: colors.walletCardText }]}>{formatCurrency(balance)}</Text>
+          <Text style={[styles.balanceAmount, { color: colors.walletCardText }]}>{formatCurrency(effectiveBalance)}</Text>
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <TrendingUp color="rgba(255,255,255,0.7)" size={16} />
@@ -56,6 +58,15 @@ export default function WalletScreen() {
             </View>
           </View>
         </View>
+
+        {isBlocked && (
+          <View style={[styles.blockedBanner, { backgroundColor: colors.blockedBg, borderColor: colors.blockedBorder }]}>
+            <AlertCircle color={colors.error} size={20} />
+            <Text style={[styles.blockedText, { color: colors.error }]}>
+              رصيدك الحالي غير كافٍ واستقبال الطلبات متوقف. يرجى التواصل مع إدارة التطبيق لشحن الرصيد.
+            </Text>
+          </View>
+        )}
 
         <TouchableOpacity style={[styles.ledgerBtn, { backgroundColor: colors.cardBg, borderColor: colors.border }]} onPress={() => router.push('/ledger')}>
           <Receipt color={colors.primary} size={22} />
@@ -83,6 +94,8 @@ const styles = StyleSheet.create({
   statDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.2)' },
   statLabel: { fontFamily: 'Cairo-Regular', fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 4 },
   statValue: { fontFamily: 'Cairo-Bold', fontSize: 16, color: '#fff', marginTop: 4 },
+  blockedBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1 },
+  blockedText: { flex: 1, fontFamily: 'Cairo-Medium', fontSize: 13, lineHeight: 18 },
   ledgerBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 16, borderWidth: 1 },
   ledgerBtnText: { fontFamily: 'Cairo-Medium', fontSize: 15 },
   loadingText: { fontFamily: 'Cairo-Regular', fontSize: 14, textAlign: 'center', marginTop: 20 },

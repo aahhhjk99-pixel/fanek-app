@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import Head from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider } from '@/lib/auth';
@@ -63,6 +64,10 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
+          <Head>
+            <link rel="apple-touch-icon" href="./assets/images/icon.png" />
+            <link rel="icon" href="./assets/images/favicon.png" />
+          </Head>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />

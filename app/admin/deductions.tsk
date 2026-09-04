@@ -1,0 +1,264 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  TextInput, Modal, ActivityIndicator, Alert
+} from 'react-native';
+import { router } from 'expo-router';
+import { ChevronLeft, MinusCircle, Wallet, Search, User } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
+import { useTheme } from '@/lib/theme-context';
+import { useToast } from '@/lib/toast';
+import { formatCurrency } from '@/lib/format';
+import type { Profile } from '@/types/database';
+
+export default function AdminDeductionsScreen() {
+  const { colors } = useTheme();
+  const { show } = useToast();
+
+  const [technicians, setTechnicians] = useState<Profile[]>([]);
+  const [filteredTechs, setFilteredTechs] = useState<Profile[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  // Modal State
+  const [selectedTech, setSelectedTech] = useState<Profile | null>(null);
+  const [deductAmount, setDeductAmount] = useState('');
+  const [deductReason, setDeductReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchTechnicians = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'technician')
+        .order('full_name', { ascending: true });
+
+      if (error) throw error;
+      setTechnicians(data || []);
+      setFilteredTechs(data || []);
+    } catch (err: any) {
+      show('فشل تحميل قائمة الفنيين', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [show]);
+
+  useEffect(() => {
+    fetchTechnicians();
+  }, [fetchTechnicians]);
+
+  const handleSearch = (text: string) => {
+    setSearchQuery(text);
+    if (!text.trim()) {
+      setFilteredTechs(technicians);
+    } else {
+      const filtered = technicians.filter(
+        (t) =>
+          t.full_name?.toLowerCase().includes(text.toLowerCase()) ||
+          t.phone?.includes(text)
+      );
+      setFilteredTechs(filtered);
+    }
+  };
+
+  const openDeductModal = (tech: Profile) => {
+    setSelectedTech(tech);
+    setDeductAmount('');
+    setDeductReason('');
+  };
+
+  const handleApplyDeduction = async () => {
+    const amount = parseFloat(deductAmount);
+    if (isNaN(amount) || amount <= 0) {
+      show('يرجى إدخال مبلغ خصم صحيح', 'error');
+      return;
+    }
+
+    if (!selectedTech) return;
+
+    setSubmitting(true);
+    try {
+      // 1. خصم المبلغ من المحفظة عبر RPC
+      const { error: rpcError } = await supabase.rpc('deduct_tech_balance', {
+        p_technician_id: selectedTech.id,
+        p_amount: amount,
+      });
+
+      if (rpcError) throw rpcError;
+
+      show(`تم خصم ${formatCurrency(amount)} من محفظة ${selectedTech.full_name}`, 'success');
+      setSelectedTech(null);
+      fetchTechnicians();
+    } catch (err: any) {
+      show(err.message || 'حدث خطأ أثناء تطبيق الخصم', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const renderTechCard = ({ item }: { item: Profile }) => {
+    const walletBalance = item.wallet_balance || 0;
+
+    return (
+      <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+        <View style={styles.cardInfo}>
+          <View style={styles.avatarBox}>
+            <User color={colors.primary} size={22} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.techName, { color: colors.text }]}>{item.full_name || 'فني بدون اسم'}</Text>
+            <Text style={[styles.techPhone, { color: colors.subtext }]}>{item.phone || 'بدون رقم'}</Text>
+            <View style={styles.walletRow}>
+              <Wallet size={14} color={walletBalance < 0 ? colors.error : colors.success} />
+              <Text style={[styles.walletText, { color: walletBalance < 0 ? colors.error : colors.success }]}>
+                رصيد المحفظة: {formatCurrency(walletBalance)}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.deductBtn, { backgroundColor: colors.error + '15' }]}
+          onPress={() => openDeductModal(item)}
+        >
+          <MinusCircle color={colors.error} size={18} />
+          <Text style={[styles.deductBtnText, { color: colors.error }]}>خصم مبلغ</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.headerBg, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <ChevronLeft color={colors.text} size={24} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>إدارة الخصومات</Text>
+        <View style={{ width: 28 }} />
+      </View>
+
+      {/* Search Input */}
+      <View style={styles.searchBox}>
+        <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBg, borderColor: colors.border }]}>
+          <Search size={18} color={colors.subtext} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.text }]}
+            placeholder="ابحث باسم الفني أو رقم الهاتف..."
+            placeholderTextColor={colors.subtext}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+        </View>
+      </View>
+
+      {/* Tech List */}
+      {loading ? (
+        <View style={styles.loadingCenter}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredTechs}
+          keyExtractor={(item) => item.id}
+          renderItem={renderTechCard}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <Text style={[styles.emptyText, { color: colors.subtext }]}>لا يوجد فنيين مطابقين للبحث</Text>
+          }
+        />
+      )}
+
+      {/* Deduct Modal */}
+      <Modal visible={!!selectedTech} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <View style={styles.modalHeader}>
+              <MinusCircle color={colors.error} size={24} />
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                خصم من محفظة: {selectedTech?.full_name}
+              </Text>
+            </View>
+
+            <Text style={[styles.currentBalanceText, { color: colors.subtext }]}>
+              الرصيد الحالي: {formatCurrency(selectedTech?.wallet_balance || 0)}
+            </Text>
+
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.border }]}
+              placeholder="المبلغ المراد خصمه (مثال: 25)"
+              placeholderTextColor={colors.subtext}
+              keyboardType="numeric"
+              value={deductAmount}
+              onChangeText={setDeductAmount}
+            />
+
+            <TextInput
+              style={[styles.input, styles.reasonInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.border }]}
+              placeholder="سبب الخصم (اختياري)..."
+              placeholderTextColor={colors.subtext}
+              multiline
+              value={deductReason}
+              onChangeText={setDeductReason}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.inputBg }]}
+                onPress={() => setSelectedTech(null)}
+                disabled={submitting}
+              >
+                <Text style={{ color: colors.text, fontFamily: 'Cairo-Bold' }}>إلغاء</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.error }]}
+                onPress={handleApplyDeduction}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={{ color: '#fff', fontFamily: 'Cairo-Bold' }}>تأكيد الخصم</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: { paddingTop: 50, paddingBottom: 16, paddingHorizontal: 16, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  backBtn: { padding: 4 },
+  headerTitle: { fontFamily: 'Cairo-Bold', fontSize: 20 },
+  searchBox: { padding: 16, paddingBottom: 8 },
+  searchInputContainer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46, gap: 8 },
+  searchInput: { flex: 1, fontFamily: 'Cairo-Regular', fontSize: 14, textAlign: 'right' },
+  loadingCenter: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContent: { padding: 16, paddingBottom: 40 },
+  emptyText: { fontFamily: 'Cairo-Regular', fontSize: 14, textAlign: 'center', marginTop: 40 },
+  card: { borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, gap: 12 },
+  cardInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatarBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f0fdf4', justifyContent: 'center', alignItems: 'center' },
+  techName: { fontFamily: 'Cairo-Bold', fontSize: 15 },
+  techPhone: { fontFamily: 'Cairo-Regular', fontSize: 12 },
+  walletRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  walletText: { fontFamily: 'Cairo-Bold', fontSize: 13 },
+  deductBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 10 },
+  deductBtnText: { fontFamily: 'Cairo-Bold', fontSize: 13 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { borderRadius: 20, padding: 20, gap: 12 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  modalTitle: { fontFamily: 'Cairo-Bold', fontSize: 16, flex: 1 },
+  currentBalanceText: { fontFamily: 'Cairo-Medium', fontSize: 13 },
+  input: { height: 48, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, fontFamily: 'Cairo-Medium', fontSize: 14, textAlign: 'right' },
+  reasonInput: { height: 80, textAlignVertical: 'top', paddingTop: 10 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  modalBtn: { flex: 1, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+});

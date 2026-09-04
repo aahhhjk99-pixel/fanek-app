@@ -127,6 +127,7 @@ export default function OrderDetailScreen() {
     }
   };
 
+  // دالة إلغاء الطلب مع استرداد العمولة إن وجدت
   const handleConfirmCancel = async () => {
     if (!order || !cancelReason.trim()) {
       show('الرجاء إدخال سبب الإلغاء', 'error');
@@ -134,6 +135,45 @@ export default function OrderDetailScreen() {
     }
     setSubmittingCancel(true);
     try {
+      // إذا كانت الفاتورة قد صدرت وتم خصم العمولة سابقاً، نقوم بإرجاع العمولة لمحفظة الفني
+      if (invoice && invoice.commission_amount > 0 && order.technician_id) {
+        const { data: techData } = await supabase
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('id', order.technician_id)
+          .maybeSingle();
+
+        const currentBalance = (techData as any)?.wallet_balance ?? 0;
+        const newBalance = currentBalance + invoice.commission_amount;
+
+        // 1. إرجاع الرصيد
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: newBalance })
+          .eq('id', order.technician_id);
+
+        // 2. إرجاع الرصيد في جدول المحفظة الرئيسي
+        const { data: walletData } = await supabase
+          .from('wallets')
+          .select('balance')
+          .eq('technician_id', order.technician_id)
+          .maybeSingle();
+
+        if (walletData) {
+          await supabase.from('wallets')
+            .update({ balance: (walletData.balance ?? 0) + invoice.commission_amount })
+            .eq('technician_id', order.technician_id);
+        }
+
+        // 3. تسجيل حركة استرداد في جدول السجل المالي
+        await supabase.from('wallet_transactions').insert({
+          user_id: order.technician_id,
+          amount: invoice.commission_amount,
+          type: 'refund',
+          description: `استرداد عمولة بسبب إلغاء الطلب #${order.id.slice(0, 8)}`,
+        });
+      }
+
       const { error } = await supabase.from('orders').update({
         status: 'cancelled',
         cancellation_reason: cancelReason.trim(),
@@ -142,7 +182,7 @@ export default function OrderDetailScreen() {
 
       if (error) throw error;
 
-      show('تم إلغاء الطلب بنجاح', 'success');
+      show('تم إلغاء الطلب بنجاح وتحديث المحفظة', 'success');
       setShowCancelModal(false);
       setCancelReason('');
       loadOrder();
@@ -153,6 +193,7 @@ export default function OrderDetailScreen() {
     }
   };
 
+  // إصدار الفاتورة وخصم العمولة وتسجيل الحركة المالية
   const issueInvoice = async () => {
     if (!order || !profile) return;
     const labor = parseFloat(laborCost) || 0;
@@ -166,9 +207,8 @@ export default function OrderDetailScreen() {
     const isExempt = !!profile.commission_exempt &&
       (!profile.commission_exempt_until || new Date(profile.commission_exempt_until) > now);
 
-    // استخدام نسبة العمولة المخصصة إن وجدت وإلا العمولة العامة
-    const customRate = (profile as any)?.custom_commission_rate;
-    const effectiveRate = customRate ?? profile.commission_rate ?? COMMISSION_RATE;
+    const customRate = (profile as any)?.commission_rate;
+    const effectiveRate = customRate ?? COMMISSION_RATE;
     const rate = isExempt ? 0 : effectiveRate / 100;
     const commission = total * rate;
 
@@ -187,7 +227,7 @@ export default function OrderDetailScreen() {
     if (error) {
       show('فشل إصدار الفاتورة', 'error');
     } else {
-      // خصم العمولة من محفظة الفني والتأكد من دعم النزول بالسالب
+      // خصم العمولة وتسجيل الحركة الماليّة
       if (commission > 0) {
         const { data: techData } = await supabase
           .from('profiles')
@@ -198,18 +238,39 @@ export default function OrderDetailScreen() {
         const currentBalance = (techData as any)?.wallet_balance ?? 0;
         const newBalance = currentBalance - commission;
 
+        // 1. تحديث رصيد الملف الشخصي
         const { error: walletError } = await supabase
           .from('profiles')
           .update({ wallet_balance: newBalance })
           .eq('id', profile.id);
 
-        if (walletError) {
-          console.error('خطأ أثناء خصم العمولة من المحفظة:', walletError);
+        // 2. تحديث جدول المحفظة wallets إن وجد
+        const { data: existingWallet } = await supabase
+          .from('wallets')
+          .select('balance, total_commission')
+          .eq('technician_id', profile.id)
+          .maybeSingle();
+
+        if (existingWallet) {
+          await supabase.from('wallets').update({
+            balance: (existingWallet.balance ?? 0) - commission,
+            total_commission: (existingWallet.total_commission ?? 0) + commission,
+          }).eq('technician_id', profile.id);
+        }
+
+        // 3. إضافة سطر في سجل الحركات المالية wallet_transactions
+        if (!walletError) {
+          await supabase.from('wallet_transactions').insert({
+            user_id: profile.id,
+            amount: -commission,
+            type: 'commission',
+            description: `خصم عمولة تطبيق عن الطلب #${order.id.slice(0, 8)}`,
+          });
         }
       }
 
       await supabase.from('orders').update({ status: 'invoice_issued' }).eq('id', order.id);
-      show('تم إصدار الفاتورة وخصم العمولة', 'success');
+      show('تم إصدار الفاتورة وخصم العمولة بنجاح', 'success');
       setShowInvoiceForm(false);
       setLaborCost('');
       setPartsCost('');
@@ -224,7 +285,7 @@ export default function OrderDetailScreen() {
       show('فشل تأكيد السداد', 'error');
     } else {
       await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', order!.id);
-      show('تم تأكيد السداد', 'success');
+      show('تم تأكيد السداد بنجاح', 'success');
       loadOrder();
     }
   };

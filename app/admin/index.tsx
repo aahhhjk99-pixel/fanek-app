@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import {
   Users, Wrench, ClipboardList, DollarSign, AlertTriangle, TrendingUp,
-  ChevronLeft, ShieldCheck, Clock, Shield, Settings, FileText,
+  ChevronLeft, ShieldCheck, Clock, Shield, Settings, FileText, Bell,
 } from 'lucide-react-native';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
@@ -21,7 +21,7 @@ export default function AdminDashboardScreen() {
     totalCustomers: 0, totalTechnicians: 0, verifiedTechs: 0, pendingTechs: 0,
     totalOrders: 0, activeOrders: 0, completedOrders: 0, cancelledOrders: 0,
     totalRevenue: 0, platformCommission: 0, openDisputes: 0,
-  bannedUsers: 0,
+    bannedUsers: 0,
   });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [pendingTechs, setPendingTechs] = useState<Profile[]>([]);
@@ -91,23 +91,22 @@ export default function AdminDashboardScreen() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const verifyTech = async (tech: Profile, status: 'approved' | 'rejected') => {
-  const { error } = await supabase
-    .from('profiles')
-    .update({
-      verification_status: status,
-    })
-    .eq('id', tech.id);
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        verification_status: status,
+      })
+      .eq('id', tech.id);
 
-  if (error) {
-    show('فشل التحديث: ' + error.message, 'error');
-  } else {
-    show(status === 'approved' ? 'تم توثيق الفني وتفعيل حسابه' : 'تم رفض الفني', 'success');
-    loadData();
-  }
+    if (error) {
+      show('فشل التحديث: ' + error.message, 'error');
+    } else {
+      show(status === 'approved' ? 'تم توثيق الفني وتفعيل حسابه' : 'تم رفض الفني', 'success');
+      loadData();
+    }
   };
 
   return (
-    
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       <View style={[styles.header, { backgroundColor: colors.headerBg, borderBottomColor: colors.border }]}>
         <View style={styles.headerTop}>
@@ -123,15 +122,23 @@ export default function AdminDashboardScreen() {
         contentContainerStyle={styles.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} />}
       >
+        {/* أزرار الوصول السريع */}
         <View style={styles.quickActions}>
           <TouchableOpacity style={[styles.quickBtn, { backgroundColor: colors.cardBg, borderColor: colors.border }]} onPress={() => router.push('/admin/users')}>
             <Users color={colors.primary} size={22} />
             <Text style={[styles.quickBtnText, { color: colors.text }]}>الحسابات</Text>
           </TouchableOpacity>
+          
           <TouchableOpacity style={[styles.quickBtn, { backgroundColor: colors.cardBg, borderColor: colors.border }]} onPress={() => router.push('/admin/disputes')}>
             <AlertTriangle color={colors.error} size={22} />
             <Text style={[styles.quickBtnText, { color: colors.text }]}>النزاعات</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.quickBtn, { backgroundColor: colors.cardBg, borderColor: colors.border }]} onPress={() => router.push('/admin/notifications' as any)}>
+            <Bell color="#d97706" size={22} />
+            <Text style={[styles.quickBtnText, { color: colors.text }]}>الإشعارات</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[styles.quickBtn, { backgroundColor: colors.cardBg, borderColor: colors.border }]} onPress={() => router.push('/admin/support-config')}>
             <Settings color={colors.success} size={22} />
             <Text style={[styles.quickBtnText, { color: colors.text }]}>الإعدادات</Text>
@@ -219,7 +226,7 @@ export default function AdminDashboardScreen() {
               <TouchableOpacity
                 key={dispute.id}
                 style={[styles.disputeRow, { backgroundColor: colors.cardBg, borderColor: colors.border }]}
-                onPress={() => router.push(`/dispute/${dispute.id}`)}
+                onPress={() => router.push(`/dispute/${dispute.id}` as any)}
               >
                 <AlertTriangle color="#ef4444" size={18} />
                 <View style={{ flex: 1 }}>
@@ -237,13 +244,13 @@ export default function AdminDashboardScreen() {
           <TouchableOpacity
             key={order.id}
             style={[styles.orderRow, { backgroundColor: colors.cardBg, borderColor: colors.border }]}
-            onPress={() => router.push(`/order/${order.id}`)}
+            onPress={() => router.push(`/order/${order.id}` as any)}
           >
             <View style={[styles.orderDot, { backgroundColor: ORDER_STATUS_COLORS[order.status] }]} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.orderService, { color: colors.text }]}>{order.service?.name}</Text>
               <Text style={[styles.orderCustomer, { color: colors.subtext }]}>
-                {order.customer?.full_name} → {order.technician?.full_name || 'غير محدد'}
+                {order.customer?.full_name} ← {order.technician?.full_name || 'غير محدد'}
               </Text>
             </View>
             <Text style={[styles.orderStatus, { color: ORDER_STATUS_COLORS[order.status] }]}>
@@ -263,9 +270,9 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   headerTitle: { fontFamily: 'Cairo-Bold', fontSize: 20 },
   body: { padding: 16, paddingBottom: 40 },
-  quickActions: { flexDirection: 'row', gap: 10, marginBottom: 24 },
-  quickBtn: { flex: 1, alignItems: 'center', gap: 8, borderRadius: 14, padding: 16, borderWidth: 1 },
-  quickBtnText: { fontFamily: 'Cairo-Medium', fontSize: 13 },
+  quickActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  quickBtn: { width: '23%', flexGrow: 1, alignItems: 'center', gap: 8, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 8, borderWidth: 1 },
+  quickBtnText: { fontFamily: 'Cairo-Medium', fontSize: 12 },
   sectionTitle: { fontFamily: 'Cairo-SemiBold', fontSize: 18, marginBottom: 12, marginTop: 8 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   statCard: { width: '31%', flexGrow: 1, borderRadius: 14, padding: 14, borderWidth: 1, alignItems: 'center', gap: 6 },

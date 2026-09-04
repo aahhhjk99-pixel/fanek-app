@@ -5,11 +5,11 @@ import {
   Alert, TextInput, Modal, ActivityIndicator,
 } from 'react-native';
 import {
-  ChevronLeft, Search, Ban, CheckCircle, Trash2, Users, Wrench, UserCircle, Percent,
+  ChevronLeft, Search, Ban, CheckCircle, Trash2, Users, Wrench, UserCircle, Percent, Wallet, PlusCircle,
 } from 'lucide-react-native';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatCurrency } from '@/lib/format';
 import type { Profile } from '@/types/database';
 
 export default function AdminUsersScreen() {
@@ -24,6 +24,11 @@ export default function AdminUsersScreen() {
   const [selectedTech, setSelectedTech] = useState<Profile | null>(null);
   const [newCommission, setNewCommission] = useState('');
   const [updatingCommission, setUpdatingCommission] = useState(false);
+
+  // حالة مودال شحن رصيد المحفظة
+  const [selectedTechForWallet, setSelectedTechForWallet] = useState<Profile | null>(null);
+  const [rechargeAmount, setRechargeAmount] = useState('');
+  const [updatingWallet, setUpdatingWallet] = useState(false);
 
   const loadUsers = useCallback(async () => {
     let query = supabase.from('profiles').select('*');
@@ -45,7 +50,7 @@ export default function AdminUsersScreen() {
     return u.full_name?.toLowerCase().includes(q) || (u.phone || '').includes(q);
   });
 
-  // إصلاح دالة الحظر لتقوم بتحديث الخيارين account_status و is_banned
+  // دالة الحظر والفك
   const handleBan = (user: Profile) => {
     const currentlyBanned = user.account_status === 'banned' || (user as any).is_banned === true;
     const action = currentlyBanned ? 'فك الحظر' : 'حظر';
@@ -77,7 +82,7 @@ export default function AdminUsersScreen() {
     ]);
   };
 
-  // إصلاح دالة الحذف مع توفير fallback في حال عدم تعيين Edge Function
+  // دالة الحذف
   const handleDelete = (user: Profile) => {
     Alert.alert(
       'حذف حساب',
@@ -95,7 +100,6 @@ export default function AdminUsersScreen() {
               
               let deleted = false;
 
-              // محاولة الحذف عبر Edge Function
               if (supabaseUrl && token) {
                 try {
                   const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
@@ -111,11 +115,10 @@ export default function AdminUsersScreen() {
                     deleted = true;
                   }
                 } catch (e) {
-                  // في حال فشل Edge Function سنمر للحذف المباشر
+                  // Fallback to direct DB delete
                 }
               }
 
-              // إذا لم يتم الحذف عبر Edge Function، يتم الحذف المباشر من جدول Profiles
               if (!deleted) {
                 const { error: deleteError } = await supabase
                   .from('profiles')
@@ -161,6 +164,66 @@ export default function AdminUsersScreen() {
       Alert.alert('خطأ', err.message || 'حدث خطأ أثناء التحديث');
     } finally {
       setUpdatingCommission(false);
+    }
+  };
+
+  // شحن رصيد المحفظة للفني
+  const handleRechargeWallet = async () => {
+    if (!selectedTechForWallet) return;
+    const amount = parseFloat(rechargeAmount);
+
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('خطأ', 'يرجى إدخال مبلغ صحيح أكبر من الصفر');
+      return;
+    }
+
+    setUpdatingWallet(true);
+    try {
+      const techId = selectedTechForWallet.id;
+      const currentProfileBalance = (selectedTechForWallet as any).wallet_balance ?? 0;
+      const newProfileBalance = currentProfileBalance + amount;
+
+      // 1. تحديث الرصيد في جدول profiles
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ wallet_balance: newProfileBalance })
+        .eq('id', techId);
+
+      if (profileError) throw profileError;
+
+      // 2. تحديث أو إضافة السجل في جدول wallets
+      const { data: existingWallet } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('technician_id', techId)
+        .maybeSingle();
+
+      if (existingWallet) {
+        const { error: walletError } = await supabase
+          .from('wallets')
+          .update({ balance: (existingWallet.balance ?? 0) + amount })
+          .eq('technician_id', techId);
+        if (walletError) throw walletError;
+      } else {
+        const { error: walletError } = await supabase
+          .from('wallets')
+          .insert({
+            technician_id: techId,
+            balance: amount,
+            total_earnings: 0,
+            total_commission: 0,
+          });
+        if (walletError) throw walletError;
+      }
+
+      Alert.alert('نجاح', `تم شحن ${formatCurrency(amount)} إلى محفظة الفني بنجاح`);
+      setSelectedTechForWallet(null);
+      setRechargeAmount('');
+      loadUsers();
+    } catch (err: any) {
+      Alert.alert('خطأ', err.message || 'حدث خطأ أثناء شحن الرصيد');
+    } finally {
+      setUpdatingWallet(false);
     }
   };
 
@@ -219,6 +282,7 @@ export default function AdminUsersScreen() {
             const isBanned = user.account_status === 'banned' || (user as any).is_banned === true;
             const rColor = roleColor(user.role);
             const currentCommission = (user as any).commission_rate ?? 10.0;
+            const currentBalance = (user as any).wallet_balance ?? 0;
 
             return (
               <View key={user.id} style={[styles.userCard, { backgroundColor: colors.cardBg, borderColor: isBanned ? colors.error + '40' : colors.border }]}>
@@ -257,24 +321,45 @@ export default function AdminUsersScreen() {
                   </View>
                 </View>
 
-                {/* قسم نسبة العمولة المخصص للفنيين */}
+                {/* قسم تفاصيل الرصيد والعمولة المخصص للفنيين */}
                 {user.role === 'technician' && (
-                  <View style={[styles.commissionRow, { borderTopColor: colors.border }]}>
-                    <View style={styles.commissionBadge}>
-                      <Percent color={colors.primary} size={14} />
-                      <Text style={[styles.commissionLabel, { color: colors.subtext }]}>عمولة المنصة:</Text>
-                      <Text style={[styles.commissionValue, { color: colors.primary }]}>{currentCommission}%</Text>
+                  <View style={[styles.techDetailsContainer, { borderTopColor: colors.border }]}>
+                    <View style={styles.commissionRow}>
+                      <View style={styles.commissionBadge}>
+                        <Percent color={colors.primary} size={14} />
+                        <Text style={[styles.commissionLabel, { color: colors.subtext }]}>العمولة:</Text>
+                        <Text style={[styles.commissionValue, { color: colors.primary }]}>{currentCommission}%</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.editCommissionBtn, { backgroundColor: colors.primary + '15' }]}
+                        onPress={() => {
+                          setSelectedTech(user);
+                          setNewCommission(currentCommission.toString());
+                        }}
+                      >
+                        <Text style={[styles.editCommissionText, { color: colors.primary }]}>تعديل النسبة</Text>
+                      </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity
-                      style={[styles.editCommissionBtn, { backgroundColor: colors.primary + '15' }]}
-                      onPress={() => {
-                        setSelectedTech(user);
-                        setNewCommission(currentCommission.toString());
-                      }}
-                    >
-                      <Text style={[styles.editCommissionText, { color: colors.primary }]}>تعديل النسبة</Text>
-                    </TouchableOpacity>
+                    <View style={styles.commissionRow}>
+                      <View style={styles.commissionBadge}>
+                        <Wallet color={colors.success} size={14} />
+                        <Text style={[styles.commissionLabel, { color: colors.subtext }]}>الرصيد:</Text>
+                        <Text style={[styles.commissionValue, { color: currentBalance > 0 ? colors.success : colors.error }]}>
+                          {formatCurrency(currentBalance)}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.editCommissionBtn, { backgroundColor: colors.success + '15' }]}
+                        onPress={() => {
+                          setSelectedTechForWallet(user);
+                          setRechargeAmount('');
+                        }}
+                      >
+                        <PlusCircle color={colors.success} size={12} />
+                        <Text style={[styles.editCommissionText, { color: colors.success }]}>شحن الرصيد</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
 
@@ -348,6 +433,65 @@ export default function AdminUsersScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* نافذة شحن رصيد المحفظة (Modal) */}
+      <Modal visible={!!selectedTechForWallet} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>شحن رصيد محفظة الفني</Text>
+            <Text style={[styles.modalSub, { color: colors.subtext }]}>
+              الفني: {selectedTechForWallet?.full_name}
+            </Text>
+
+            <View style={[styles.inputBox, { borderColor: colors.border }]}>
+              <TextInput
+                style={[styles.modalInput, { color: colors.text }]}
+                keyboardType="numeric"
+                value={rechargeAmount}
+                onChangeText={setRechargeAmount}
+                placeholder="أدخل قيمة الشحن (مثلاً 50)"
+                placeholderTextColor={colors.subtext}
+              />
+              <Text style={{ color: colors.subtext, fontFamily: 'Cairo-Bold' }}>د.ل</Text>
+            </View>
+
+            {/* أزرار سريعة للشحن */}
+            <View style={styles.quickAmountsRow}>
+              {[10, 20, 50, 100].map((amt) => (
+                <TouchableOpacity
+                  key={amt}
+                  style={[styles.quickAmountBtn, { backgroundColor: colors.primary + '15' }]}
+                  onPress={() => setRechargeAmount(amt.toString())}
+                >
+                  <Text style={{ color: colors.primary, fontFamily: 'Cairo-Bold', fontSize: 12 }}>+{amt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.border }]}
+                onPress={() => setSelectedTechForWallet(null)}
+              >
+                <Text style={{ color: colors.text, fontFamily: 'Cairo-Bold' }}>إلغاء</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.success }]}
+                onPress={handleRechargeWallet}
+                disabled={updatingWallet}
+              >
+                {updatingWallet ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={{ color: '#fff', fontFamily: 'Cairo-Bold' }}>تأكيد الشحن</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -376,11 +520,12 @@ const styles = StyleSheet.create({
   bannedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   bannedText: { fontFamily: 'Cairo-Medium', fontSize: 11 },
   userDate: { fontFamily: 'Cairo-Regular', fontSize: 11, marginTop: 6 },
-  commissionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTopWidth: 1 },
+  techDetailsContainer: { marginTop: 12, paddingTop: 8, borderTopWidth: 1, gap: 8 },
+  commissionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   commissionBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   commissionLabel: { fontFamily: 'Cairo-Regular', fontSize: 12 },
   commissionValue: { fontFamily: 'Cairo-Bold', fontSize: 13 },
-  editCommissionBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  editCommissionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   editCommissionText: { fontFamily: 'Cairo-Bold', fontSize: 12 },
   actionRow: { flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 12, borderTopColor: '#e5e7eb', borderTopWidth: 1 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
@@ -389,8 +534,10 @@ const styles = StyleSheet.create({
   modalContent: { width: '100%', borderRadius: 16, padding: 20 },
   modalTitle: { fontFamily: 'Cairo-Bold', fontSize: 18, textAlign: 'center' },
   modalSub: { fontFamily: 'Cairo-Regular', fontSize: 13, textAlign: 'center', marginTop: 4, marginBottom: 16 },
-  inputBox: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, height: 48, marginBottom: 20 },
+  inputBox: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, height: 48, marginBottom: 12 },
   modalInput: { flex: 1, fontFamily: 'Cairo-Bold', fontSize: 16, textAlign: 'right' },
+  quickAmountsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginBottom: 20 },
+  quickAmountBtn: { flex: 1, height: 36, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   modalActions: { flexDirection: 'row', gap: 12 },
   modalBtn: { flex: 1, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
 });

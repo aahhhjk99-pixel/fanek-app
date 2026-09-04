@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { router } from 'expo-router';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Linking,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Linking, Alert,
 } from 'react-native';
-import { MessageCircle, Phone } from 'lucide-react-native';
+import { MessageCircle, Phone, Trash2 } from 'lucide-react-native';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
@@ -22,6 +22,16 @@ export default function OrdersScreen() {
 
   const loadOrders = useCallback(async () => {
     if (!profile) return;
+
+    // 1. جلب الطلبات المخفية الخاصة بهذا المستخدم فقط
+    const { data: hiddenData } = await supabase
+      .from('hidden_orders')
+      .select('order_id')
+      .eq('user_id', profile.id);
+
+    const hiddenIds = hiddenData?.map((h) => h.order_id) || [];
+
+    // 2. استعلام الطلبات مع استثناء المخفي منها
     let query = supabase.from('orders').select(`
       *,
       service:services(*),
@@ -35,6 +45,10 @@ export default function OrdersScreen() {
       query = query.eq('technician_id', profile.id);
     }
 
+    if (hiddenIds.length > 0) {
+      query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
+    }
+
     const { data } = await query.order('created_at', { ascending: false });
     setOrders((data as Order[]) || []);
     setLoading(false);
@@ -42,6 +56,33 @@ export default function OrdersScreen() {
   }, [profile]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  // دالة إخفاء/حذف الطلب المكتمل من حساب المستخدم الحالي
+  const handleDeleteCompletedOrder = (orderId: string) => {
+    Alert.alert(
+      'حذف الطلب من السجل',
+      'هل أنت متأكد من حذف هذا الطلب المكتمل من سجلك؟ (سيختفي من حسابك فقط ولن يؤثر على باقي الأطراف)',
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'حذف',
+          style: 'destructive',
+          onPress: async () => {
+            if (!profile) return;
+            const { error } = await supabase
+              .from('hidden_orders')
+              .insert({ user_id: profile.id, order_id: orderId });
+
+            if (error) {
+              Alert.alert('خطأ', error.message || 'حدث خطأ أثناء حذف الطلب');
+            } else {
+              loadOrders();
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const filteredOrders = orders.filter((o) => {
     if (filter === 'all') return true;
@@ -106,6 +147,18 @@ export default function OrdersScreen() {
                     </Text>
                     <Text style={[styles.orderTime, { color: colors.subtext }]}>{timeAgo(order.created_at)}</Text>
                   </View>
+
+                  {/* زر حذف الطلب للطلبات المكتملة */}
+                  {order.status === 'completed' && (
+                    <TouchableOpacity
+                      style={styles.deleteBtn}
+                      onPress={() => handleDeleteCompletedOrder(order.id)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Trash2 color="#ef4444" size={18} />
+                    </TouchableOpacity>
+                  )}
+
                   <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
                     <Text style={[styles.statusText, { color: statusColor }]}>
                       {ORDER_STATUS_LABELS[order.status]}
@@ -173,6 +226,7 @@ const styles = StyleSheet.create({
   orderIconBox: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   orderService: { fontFamily: 'Cairo-SemiBold', fontSize: 15 },
   orderTime: { fontFamily: 'Cairo-Regular', fontSize: 12, marginTop: 2 },
+  deleteBtn: { padding: 4, paddingHorizontal: 6 },
   statusBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   statusText: { fontFamily: 'Cairo-Medium', fontSize: 12 },
   orderDetails: { borderTopWidth: 1, paddingTop: 10, gap: 4 },

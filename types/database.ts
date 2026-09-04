@@ -44,6 +44,12 @@ export interface Profile {
   promo_signup_bonus_used: boolean;
   account_status: AccountStatus;
   created_at: string;
+  // الحقول الجديدة للإشعارات والمحفظة والرتب
+  push_token?: string | null;
+  wallet_balance?: number;
+  custom_commission_rate?: number | null;
+  loyalty_points?: number;
+  tech_badge?: 'bronze' | 'silver' | 'gold';
 }
 
 export interface Service {
